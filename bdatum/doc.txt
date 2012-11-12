@@ -1,0 +1,132 @@
+h1: C#
+
+Essa biblioteca em c# permite utilizar a plataforma B-datum com a plataforma .net
+
+h2: Como instalar?
+
+Você pode fazer o download do codigo fonte da biblioteca diretamente do github:
+
+	git clone address
+
+Ou utilizar uma das versões abaixo:
+
+	1
+	2
+	3
+
+Depois disso basta voce adicionar o projeto bdatum a sua solução no visual studio. É necessario usar o .net 4.0 ou superior. 
+
+
+h2: Inicializando:
+
+Para utilizar a biblioteca é necessario que voce tenha as credenciais para fazer o backup. Elas são as chave de organização e a chaves de ponto. 
+
+Sua chave de organização é obtida no momento do cadastro. Sua chave de ponto pode ser obtida cadastrando na interface web um novo ponto, ou sistematicamente utilizando a api.
+
+A biblioteca é composta de 3 classes que lhe permite interagir com o b-datum
+
+	- b_datum : Representa sua organização, o objeto criado a partir dessa classe ira conter os dados da sua organizao e é capaz de criar novos pontos sistematicamente.
+	- b_node:   Representa um ponto. Ele contem a chave de ponto ( node_key ) e quando criado a partir de uma organização, ele pode ser ativado. É atravéz dele que poderemos fazer upload, download e as operações de backup.
+	- b_http:   Wrapper para as chamadas http utilizadas. Normalmente b_datum e b_node são suficientes para interagir com o sistema, porém essa biblioteca contem as chamadas https basicas que podem ser usadas para expansão ou criação de novas funções do sistema.
+
+
+h2: Utilização:
+
+	Após adicionar em sua solução no visual studio, cria-se um novo objeto b_datum que representa sua organização:
+
+	Adicionando a biblioteca no namespace:
+	<code>
+	using bdatum;
+	</code>
+
+	Instanciando uma nova organização:
+	<code>
+	b_datum server = new b_datum();
+	server.api_key = "api_key";
+        server.partner_key = "partner_key";
+	</code>
+
+	
+	Agora é possivel criar um novo ponto a partir de sua organização:
+	<code>
+	b_node node = server.add_node();	
+	</code>
+
+	Esse node irá conter a chave de ativação e todos os dados de credenciais. Note é necessario ativar o ponto posteriormente.
+	<code>
+	node.activate();
+	</code>
+
+	O nó ativo irá conter sua chave de ponto.
+
+	<code>
+	string nodekey = node.node_key;
+	</code>
+
+	
+h3: Manipulação de Arquivos:
+
+	h4: Upload
+
+	Para enviar um arquivo, basta perdir ao node para fazer o upload do arquivo pelo seu path completo em disco:
+	
+	<code>
+	bool status = node.upload( "c:\himem.sys" );
+	</code>
+
+	Note que o status é verdadeiro ou falso conforme o sucesso da operação. É possivel enviar quantos arquivos forem necessarios. 
+	
+	Também é possivel definir o diretorio no servidor onde o upload será feito. No caso para fazer o upload do arquivo num diretorio especifico, 
+	basta incluir o path como parametro.
+	
+	<code>
+	bool status = node.upload( "c:\himen.sys" , "\dos\antigo\");
+	</code>
+
+	Neste caso ele irá salvar o arquivo dentro do diretorio "\dos\antigo";
+	
+
+	h4: Download
+
+	Para fazer o download do arquivo, basta chamar a função de download, com o nome completo do arquivo no servidor.
+	No caso para o exemplo acima, seria possivel fazer o download como:
+
+	<code>
+	bool status = node.download( "\dos\antigo\himen.sys", "c:\himen.sys" );	
+	</code>	
+
+	Ele irá fazer o download do arquivo disponivel em \dos\antigo\himen.sys para a raiz do disco no computador.
+	Note que ele irá sobrescrever se o arquivo já existir em disco.
+
+	È possivel recuperar uma versão em especifico do arquivo:
+	<code>
+	bool status  = node.download( "\dos\antigo\himen.sys", "c:\himen.sys", 7 );
+	</code>
+
+	Nesse caso ele irá fazer o download da versão 7 do arquivo disponivel no servidor.
+
+	h4: Listar os arquivos disponiveis
+
+	Para listar os arquivos disponiveis basta chamar list, para listar os arquivos de um diretorio especifico, basta chamar list com o parametro do path. [1]
+
+	<code>
+	ListIterator files = node.list();
+	</code>
+
+	<code>
+	ListIterator files = node.list("\dos\antigo");
+	</code>
+
+		
+	h4: Apagar um arquivo
+
+	Para apagar um arquivo, basta chamar delete, com o path completo no servidor:
+
+	<code>
+	bool status = node.delete("\dos\antigo\himen.sys");
+	</code>
+
+	
+Observações:
+
+[1] A definir a forma de retorno do comando de listagem dos diretorios.
