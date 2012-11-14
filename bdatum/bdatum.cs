@@ -19,7 +19,7 @@ namespace bdatum
     public class b_http
     {
 
-        private static string url = "https://api.b-datum.com/";
+        public static string url = "https://api.b-datum.com/";
 
         /*  TODO: Make parameters optional
          * 
@@ -45,10 +45,16 @@ namespace bdatum
             return responseFromServer;            
         }
 
-        public static string POST ( string path, string post_data )
+        public static string POST ( string path, string post_data, string auth_key = null )
         {
             WebRequest request = WebRequest.Create( url + path );
             request.Method = "POST";
+
+            if (!String.IsNullOrEmpty(auth_key))
+            {
+                string authotization_header = ("Authorization: Basic " + auth_key);
+                request.Headers.Add(authotization_header);
+            }
 
             byte[] byte_post_data = Encoding.UTF8.GetBytes( post_data );
 
@@ -192,14 +198,41 @@ namespace bdatum
         public string organization_id { get; set; }
         public string user_name { get; set; }
 
+        /*
+         *  POST to /organization/{id_organizacao}/node
+         * 
+         *  With api_key={api_key}&name=usuario@email.com
+         */
+
         public b_node add_node()
         {
+            string answer = b_http.POST("/organization/" + organization_id + "/node", "api_key=" + api_key + "&name=" + this.user_name);
+
+            // 403 error, I don´t know what to do.                        
+
             return null;
         }
 
-        public b_node node()
+        public b_node node_to_activate(string activation_key)
         {
-            return null;
+            b_node node = new b_node();
+
+            node.activation_key = activation_key;
+            node.organization = this.organization_id;
+            node.partner_key = this.partner_key;
+
+            return node;
+        }
+
+        public b_node node( string node_key )
+        {
+            b_node node = new b_node();
+
+            node.organization = this.organization_id;
+            node.partner_key = this.partner_key;
+            node.node_key = node_key;
+
+            return node;
         }
 
         /*
@@ -260,11 +293,15 @@ namespace bdatum
             return b_http.DELETE("storage/" + path, _auth_key());
         }
 
-        public string upload( string path )
+        public string upload( string serverpath, string path )
         {
-            return "TODO";
+            WebClient wc = new WebClient();
+            wc.Headers.Add("Authorization: Basic " + _auth_key());
+
+            wc.UploadFile( b_http.url + "/storage/" + serverpath, path);
+
+            return null;
         }
 
     }
-
 }
