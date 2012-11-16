@@ -5,12 +5,63 @@ using System.Text;
 
 using System.IO;
 using System.Net;
+using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 using System.Collections.Specialized;
 
+using Newtonsoft.Json.JsonSerializer;
+
 namespace bdatum
 {
+    //"{\"objects\":{\"foo\":{\"versions\":[],\"type\":\"file\"}}}"
+
+
+    //{\"timestamp\":\"2012-11-16T12:25:25.000Z\",\"version\":\"1\",\"size\":\"737\"}
+    [DataContract]
+    public class Versions
+    {
+        [DataMember(Name = "timestamp")]
+        public string timestamp { get; set; }
+        [DataMember(Name = "version")]
+        public string version { get; set; }
+        [DataMember(Name = "size")]
+        public string size { get; set; }
+    }
+
+    [DataContract]
+    public class FileObject
+    {
+        // ? match anyname?
+        [DataMember()]
+        public string file { get; set; }
+    }
+
+    [DataContract]
+    public class FileObjectList
+    {
+        [DataMember(Name = "objects")]
+        public string objects { get; set; }        
+    }
+
+    public static class BDatumJson
+    {
+
+        public static FileObjectList load_json( Stream json )
+        {
+            StreamReader sr = new StreamReader(json);
+            string debug = sr.ReadToEnd();
+            DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(FileObjectList) );
+            object objResponse = serializer.ReadObject(json);
+            FileObjectList filelist = objResponse as FileObjectList;
+
+            return filelist;
+            //this.files = (file_object)serializer.ReadObject(json);           
+
+        }
+
+    }
+
 
     /*
      *  Not in correct way yet, just for DRY
@@ -21,12 +72,10 @@ namespace bdatum
 
         public static string url = "https://api.b-datum.com/";
 
-        /*  TODO: Make parameters optional
-         * 
-         *  Make authentication optional 
-         */
+        // wrap it!!!
+        // TODO: make it in the correct way and wrap it!
 
-        public static string GET ( string path, string auth_key )
+        public static Stream GET ( string path, string auth_key )
         {
             WebRequest request = WebRequest.Create( url + path );
             request.Method = "GET";
@@ -40,9 +89,30 @@ namespace bdatum
             Stream data_stream = response.GetResponseStream();
             StreamReader response_stream = new StreamReader(data_stream);
 
+            return data_stream;
+
+            //string responseFromServer = response_stream.ReadToEnd();
+
+            //return responseFromServer;            
+        }
+
+        public static string HEAD(string path, string auth_key)
+        {
+            WebRequest request = WebRequest.Create(url + path);
+            request.Method = "HEAD";
+
+            string authotization_header = ("Authorization: Basic " + auth_key);
+            request.Headers.Add(authotization_header);
+
+            WebResponse response = request.GetResponse();
+            var status = (((HttpWebResponse)response).StatusDescription);
+
+            Stream data_stream = response.GetResponseStream();
+            StreamReader response_stream = new StreamReader(data_stream);
+
             string responseFromServer = response_stream.ReadToEnd();
 
-            return responseFromServer;            
+            return responseFromServer;
         }
 
         public static string POST ( string path, string post_data, string auth_key = null )
@@ -114,6 +184,8 @@ namespace bdatum
         /*
          *   Hand made post, the dot net client wasn´t working ok so 
          *   I wrote it byhand to help debug and fine adjust
+         *   
+         *   DEPRECATED :)
          */ 
 
         public static long UPLOAD(string path, string auth_key, string file)
@@ -190,6 +262,10 @@ namespace bdatum
             return 0;
         }
     }
+
+    /*
+     *  In true this is a organization
+     */
 
     public class b_datum
     {
@@ -270,38 +346,71 @@ namespace bdatum
 
         public string list ()
         {
-            return b_http.GET("storage", _auth_key() );
+            Stream response = b_http.GET("storage", _auth_key() );            
+
+            FileObjectList list;
+
+            list = BDatumJson.load_json(response);
+
+            StreamReader response_stream = new StreamReader(response);
+            string responseFromServer = response_stream.ReadToEnd();
+
+            return responseFromServer;
+
         }
 
-        public string info ( string path, int version )
-        {
-            return "TODO";
-        }
+        // TODO: version
 
-        public string download_file( string path )
+        public string info ( string path )
         {
-            return b_http.GET("storage/" + path, _auth_key());
+            return b_http.HEAD("storage/" + path, _auth_key());
         }
-
-        public string download_file( string path, int version )
-        {
-            return b_http.GET("storage/" + path + "?version=" + version.ToString(), _auth_key());
-        }
+               
     
         public string delete( string path )
         {
             return b_http.DELETE("storage/" + path, _auth_key());
         }
 
+        /*
+         *  PUT works fine with default ms library.
+         *  the POST requires that the upload has a value=argument, that is not supported
+         *  by WebClient.
+         */
+
         public string upload( string serverpath, string path )
         {
             WebClient wc = new WebClient();
+            wc.Headers.Add("Authorization: Basic " + _auth_key());            
+
+            wc.UploadFile( b_http.url + "/storage/" + serverpath, "PUT", path);
+
+            return null;            
+        }
+
+        public string download(string serverpath, string savepath)
+        {
+            //b_http.GET("storage/" + path + "?version=" + version.ToString(), _auth_key());
+
+            WebClient wc = new WebClient();
             wc.Headers.Add("Authorization: Basic " + _auth_key());
 
-            wc.UploadFile( b_http.url + "/storage/" + serverpath, path);
+            wc.DownloadFile(b_http.url + "/storage/" + serverpath, savepath);
 
             return null;
         }
 
     }
+
+    /*
+      { "objects":
+     *  {"foo": { 
+     *       "versions": [
+     *              {"timestamp":"2012-11-16T12:25:25.000Z","version":"1","size":"737"}
+     *            ]
+     *            ,"type":"file"
+     *      }
+     *  }
+     * }
+     */
 }
