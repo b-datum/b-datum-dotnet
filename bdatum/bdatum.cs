@@ -10,53 +10,70 @@ using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 using System.Collections.Specialized;
 
-using Newtonsoft.Json.JsonSerializer;
+using Newtonsoft;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
 
 namespace bdatum
 {
-    //"{\"objects\":{\"foo\":{\"versions\":[],\"type\":\"file\"}}}"
-
-
-    //{\"timestamp\":\"2012-11-16T12:25:25.000Z\",\"version\":\"1\",\"size\":\"737\"}
-    [DataContract]
-    public class Versions
+ 
+    public class Version
     {
-        [DataMember(Name = "timestamp")]
-        public string timestamp { get; set; }
-        [DataMember(Name = "version")]
+        // order by version ( it is possible, check on api )
+        public string timestamp { get; set; }        
         public string version { get; set; }
-        [DataMember(Name = "size")]
         public string size { get; set; }
     }
 
-    [DataContract]
+    public class VersionList
+    {
+        public List<Version> versions { get; set; }
+        public string type { get; set; }
+    }
+
     public class FileObject
     {
-        // ? match anyname?
-        [DataMember()]
-        public string file { get; set; }
+        public VersionList versions { get; set; }
+        public string name { get; set; }        
     }
 
-    [DataContract]
     public class FileObjectList
     {
-        [DataMember(Name = "objects")]
-        public string objects { get; set; }        
+        public List<FileObject> objects { get; set; }
+        public string json { get; set; }
     }
 
-    public static class BDatumJson
+    public static class FileList
     {
 
-        public static FileObjectList load_json( Stream json )
+        public static FileObjectList load_json( string root_json )
         {
-            StreamReader sr = new StreamReader(json);
-            string debug = sr.ReadToEnd();
-            DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(FileObjectList) );
-            object objResponse = serializer.ReadObject(json);
-            FileObjectList filelist = objResponse as FileObjectList;
+            FileObjectList root = new FileObjectList();
+            root.objects = new List<FileObject>();
+            root.json = root_json;
 
-            return filelist;
-            //this.files = (file_object)serializer.ReadObject(json);           
+            JObject process_json = JObject.Parse(root_json);
+
+            IList<JToken> files = process_json["objects"].Children().ToList();
+
+            foreach (JProperty file in files)
+            {
+                string name = file.Name;
+                string json = file.Value.ToString();
+
+                FileObject fileObject = new FileObject();
+                fileObject.name = name;
+
+                //VersionList
+                VersionList fileVersions = JsonConvert.DeserializeObject<VersionList>(json);
+                
+                fileObject.versions = fileVersions;
+
+                root.objects.Add(fileObject);
+            }            
+                     
+            return root;            
 
         }
 
@@ -344,19 +361,16 @@ namespace bdatum
             return b_http.POST("node/activate", activate_parameters);
         }
 
-        public string list ()
+        public FileObjectList list ()
         {
             Stream response = b_http.GET("storage", _auth_key() );            
-
-            FileObjectList list;
-
-            list = BDatumJson.load_json(response);
 
             StreamReader response_stream = new StreamReader(response);
             string responseFromServer = response_stream.ReadToEnd();
 
-            return responseFromServer;
+            FileObjectList root = FileList.load_json(responseFromServer);
 
+            return root;
         }
 
         // TODO: version
@@ -390,14 +404,19 @@ namespace bdatum
 
         public string download(string serverpath, string savepath)
         {
-            //b_http.GET("storage/" + path + "?version=" + version.ToString(), _auth_key());
-
             WebClient wc = new WebClient();
             wc.Headers.Add("Authorization: Basic " + _auth_key());
 
             wc.DownloadFile(b_http.url + "/storage/" + serverpath, savepath);
 
             return null;
+        }
+
+        public string test_json()
+        {
+            FileObjectList root = FileList.load_json("{\"objects\":{\"teste24\":{\"versions\":[{\"timestamp\":\"2012-11-17T11:26:50.000Z\",\"version\":\"1\",\"size\":\"737\"}],\"type\":\"file\"},\"foo\":{\"versions\":[{\"timestamp\":\"2012-11-16T12:25:25.000Z\",\"version\":\"1\",\"size\":\"737\"}],\"type\":\"file\"},\"UG9aeuQv4hGmZWPJfIxCmQ\":{\"versions\":[{\"timestamp\":\"2012-11-17T11:14:57.000Z\",\"version\":\"1\",\"size\":\"737\"}],\"type\":\"file\"},\"teste\":{\"type\":\"dir\"}}}");
+
+            return root.json;
         }
 
     }
