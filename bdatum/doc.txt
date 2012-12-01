@@ -6,20 +6,31 @@ h2: Como instalar?
 
 Você pode fazer o download do codigo fonte da biblioteca diretamente do github:
 
-	git clone address
+	git clone https://github.com/b-datum/b-datum-dotnet.git
 
 Ou utilizar uma das versões abaixo:
 
-	1
-	2
-	3
+	https://github.com/b-datum/b-datum-dotnet/archive/master.zip
 
-Depois disso basta voce adicionar o projeto bdatum a sua solução no visual studio. É necessario usar o .net 4.0 ou superior. 
+O github também fornece um cliente proprio para download do codigo fonte especialmente feito para usuarios windows, nele é possivel fazer o download do codigo e manter atualizado com a versão atual mais facilmente.
 
+	http://windows.github.com/
 
-h2: Inicializando:
+Depois de instalar, basta apenas adicionar o repositorio do b-datum, e clonar o repositorio b-datum-dotnet.
 
-Para utilizar a biblioteca é necessario que voce tenha as credenciais para fazer o backup. Elas são as chave de organização e a chaves de ponto. 
+h2: Pré Requisitos
+
+Depois disso basta voce adicionar o projeto bdatum a sua solução no visual studio. É necessario usar o .net 4.0 ou superior. Se o visual studio após você adicionar o projeto a sua solução não adicionar as referencias, você ira precisar adicionar as referencias do projeto na solução.
+
+Também será necessario a biblioteca json.net. Ela está disponivel em: http://json.codeplex.com.  O jeito mais pratico é instalar direto utilizando NuGet:
+
+	<code>
+	PM> Install-Package Newtonsoft.Json
+	</code>
+
+h2: Utilizando:
+
+Para utilizar a biblioteca é necessario que voce tenha as credenciais para fazer o backup. Elas são a chave de organização e as chaves de ponto. 
 
 Sua chave de organização é obtida no momento do cadastro. Sua chave de ponto pode ser obtida cadastrando na interface web um novo ponto, ou sistematicamente utilizando a api.
 
@@ -27,7 +38,7 @@ A biblioteca é composta de 3 classes que lhe permite interagir com o b-datum
 
 	- b_datum : Representa sua organização, o objeto criado a partir dessa classe ira conter os dados da sua organizao e é capaz de criar novos pontos sistematicamente.
 	- b_node:   Representa um ponto. Ele contem a chave de ponto ( node_key ) e quando criado a partir de uma organização, ele pode ser ativado. É atravéz dele que poderemos fazer upload, download e as operações de backup.
-	- b_http:   Wrapper para as chamadas http utilizadas. Normalmente b_datum e b_node são suficientes para interagir com o sistema, porém essa biblioteca contem as chamadas https basicas que podem ser usadas para expansão ou criação de novas funções do sistema.
+	- FileObjectList:  Representa uma lista de arquivos disponiveis no servidor.
 
 
 h2: Utilização:
@@ -39,14 +50,17 @@ h2: Utilização:
 	using bdatum;
 	</code>
 
-	Instanciando uma nova organização:
+	Instanciando uma nova organização:	
 	<code>
-	b_datum server = new b_datum();
-	server.api_key = "api_key";
-        server.partner_key = "partner_key";
+	b_datum organizacao = new b_datum();
+        organization.api_key = "api_key";
+        organization.partner_key = "partner_key";
+        organization.user_name = "usuario@email.com";
+	organization.organization_id = "49";
 	</code>
 
-	
+	Para criação de novos nós, é necessario passar o email e o numero da organização para o objeto b_datum criado.
+
 	Agora é possivel criar um novo ponto a partir de sua organização:
 	<code>
 	b_node node = server.add_node();	
@@ -57,8 +71,7 @@ h2: Utilização:
 	node.activate();
 	</code>
 
-	O nó ativo irá conter sua chave de ponto.
-
+	O nó ativo irá conter sua chave de ponto:
 	<code>
 	string nodekey = node.node_key;
 	</code>
@@ -71,28 +84,19 @@ h3: Manipulação de Arquivos:
 	Para enviar um arquivo, basta perdir ao node para fazer o upload do arquivo pelo seu path completo em disco:
 	
 	<code>
-	bool status = node.upload( "c:\himem.sys" );
+	string status = node.upload( "nomedoarquivo", "c:\arquivo.ext" );
 	</code>
 
 	Note que o status é verdadeiro ou falso conforme o sucesso da operação. É possivel enviar quantos arquivos forem necessarios. 
 	
-	Também é possivel definir o diretorio no servidor onde o upload será feito. No caso para fazer o upload do arquivo num diretorio especifico, 
-	basta incluir o path como parametro.
 	
-	<code>
-	bool status = node.upload( "c:\himen.sys" , "\dos\antigo\");
-	</code>
-
-	Neste caso ele irá salvar o arquivo dentro do diretorio "\dos\antigo";
-	
-
 	h4: Download
 
 	Para fazer o download do arquivo, basta chamar a função de download, com o nome completo do arquivo no servidor.
 	No caso para o exemplo acima, seria possivel fazer o download como:
 
 	<code>
-	bool status = node.download( "\dos\antigo\himen.sys", "c:\himen.sys" );	
+	string status = node.download( "nomedoarquivo", "c:\arquivo.ext" );	
 	</code>	
 
 	Ele irá fazer o download do arquivo disponivel em \dos\antigo\himen.sys para a raiz do disco no computador.
@@ -100,22 +104,29 @@ h3: Manipulação de Arquivos:
 
 	È possivel recuperar uma versão em especifico do arquivo:
 	<code>
-	bool status  = node.download( "\dos\antigo\himen.sys", "c:\himen.sys", 7 );
+	string status  = node.download( "nomedoarquivo", "c:\arquivo.ext", 7 );
 	</code>
 
 	Nesse caso ele irá fazer o download da versão 7 do arquivo disponivel no servidor.
 
 	h4: Listar os arquivos disponiveis
 
-	Para listar os arquivos disponiveis basta chamar list, para listar os arquivos de um diretorio especifico, basta chamar list com o parametro do path. [1]
+	Para listar os arquivos disponiveis basta chamar list. Ele retorna um objeto do tipo FileObjectList. Para percorrer todos os elementos deve-se carregar em uma lista o resultado do metodo objects.
 
 	<code>
-	ListIterator files = node.list();
+	FileObjectList root = node.list();
+
+
+        foreach (FileObject file in root.objects)
+        {
+        	items.Add(new TreeItem(file.name, 0));
+        	treeView1.Nodes.Add(file.name);
+        }
+
+
 	</code>
 
-	<code>
-	ListIterator files = node.list("\dos\antigo");
-	</code>
+	No exemplo acima, temos uma lista de arquivos carregada em um componente tree view de uma interface grafica.
 
 		
 	h4: Apagar um arquivo
@@ -126,7 +137,18 @@ h3: Manipulação de Arquivos:
 	bool status = node.delete("\dos\antigo\himen.sys");
 	</code>
 
-	
-Observações:
 
-[1] A definir a forma de retorno do comando de listagem dos diretorios.
+h3: Extras
+
+	Dentro do mesmo repositorio no git-hub, temos uma pequena aplicação windows, chamada exemmplo_app. Ela é um projeto do visual studio com 
+uma interface simples com botões para as principais funções disponíveis na api. Pode-se utiliza-la para testes ou para começar uma aplicação como modelo.
+É só preencher as credenciais dentro do Form1.cs e utilizar!
+
+
+
+
+	
+
+
+
+	
