@@ -8,16 +8,265 @@ using System.Net;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
-using System.Collections.Specialized;
 
 using Newtonsoft;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
+using System.Configuration;
+using System.Collections;
+using System.Collections.Specialized;
+
+using RestSharp;
 
 namespace bdatum
 {
- 
+    #region Configuration
+
+    public class bdatumConfig : ConfigurationElement
+    {
+        public bdatumConfig() { }
+
+        public bdatumConfig(string api_key, string partner_key, string organization_id, string user_name)
+        {
+
+        }
+
+        [ConfigurationProperty("api_key", DefaultValue = "", IsRequired = true)]
+        public string Api_Key
+        {
+            get
+            {
+                return (string)this["api_key"];
+            }
+            set
+            {
+                this["api_key"] = value;
+            }
+        }
+
+        [ConfigurationProperty("partner_key", DefaultValue = "", IsRequired = true)]
+        public string Partner_Key
+        {
+            get
+            {
+                return (string)this["partner_key"];
+            }
+            set
+            {
+                this["partner_key"] = value;
+            }
+        }
+        [ConfigurationProperty("organization_id", DefaultValue = "", IsRequired = true)]
+        public string Organization_ID
+        {
+            get
+            {
+                return (string)this["organization_id"];
+            }
+            set
+            {
+                this["organization_id"] = value;
+            }
+        }
+        //[ConfigurationProperty("user_name", DefaultValue = "", IsRequired=true)]
+
+
+    }
+
+    public static class bdatumConfigManager
+    {
+        public static void SaveSettings(bOrganization oconfig)
+        {
+            Configuration roamingConfig =
+                ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+
+            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
+            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
+
+            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
+
+            //bconfig.AppSettings.Settings.Add("api_key", oconfig.api_key);
+            bconfig.AppSettings.Settings["api_key"].Value = oconfig.api_key;
+
+            bconfig.AppSettings.Settings["organization_id"].Value = oconfig.organization_id;
+            bconfig.AppSettings.Settings["partner_key"].Value = oconfig.partner_key;
+            bconfig.AppSettings.Settings["user_name"].Value = oconfig.user_name;
+
+            if (bconfig.AppSettings.Settings["node_key"] == null)
+            {
+                bconfig.AppSettings.Settings.Add("node_key", oconfig.node_key);
+            }
+            else
+            {
+                bconfig.AppSettings.Settings["node_key"].Value = oconfig.node_key;
+            }
+
+
+            bconfig.Save();
+            //config.Save(ConfigurationSaveMode.Modified);
+
+            string sectionName = "appSettings";
+            ConfigurationManager.RefreshSection(sectionName);
+        }
+
+        public static void LoadSettings(out bOrganization oconfig)
+        {
+            Configuration roamingConfig =
+                ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+
+            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
+            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
+
+            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
+            oconfig = new bOrganization();
+
+            if (bconfig.AppSettings.Settings["api_key"] != null)
+            {
+                oconfig.api_key = bconfig.AppSettings.Settings["api_key"].Value;
+            }
+            if (bconfig.AppSettings.Settings["organization_id"] != null)
+            {
+                oconfig.organization_id = bconfig.AppSettings.Settings["organization_id"].Value;
+            }
+
+            if (bconfig.AppSettings.Settings["partner_key"] != null)
+            {
+                oconfig.partner_key = bconfig.AppSettings.Settings["partner_key"].Value;
+            }
+
+            if (bconfig.AppSettings.Settings["user_name"] != null)
+            {
+                oconfig.user_name = bconfig.AppSettings.Settings["user_name"].Value;
+            }
+
+            if (bconfig.AppSettings.Settings["node_key"] != null)
+            {
+                oconfig.node_key = bconfig.AppSettings.Settings["node_key"].Value;
+            }
+
+        }
+
+        public static void _LoadFileSettings()
+        {
+#if DEBUG
+            string applicationName =
+                Environment.GetCommandLineArgs()[0];
+#else 
+           string applicationName =
+          Environment.GetCommandLineArgs()[0]+ ".exe";
+#endif
+            string exePath = System.IO.Path.Combine(
+                    Environment.CurrentDirectory, applicationName);
+            System.Configuration.Configuration config =
+        ConfigurationManager.OpenExeConfiguration(exePath);
+
+        }
+
+    }
+
+    #endregion
+
+    public class bFileAgent
+    {
+        public string path { get; set; }
+        public bNode node { get; set; }
+
+        // local path in absolute
+        private Dictionary<string, bFile> filelist = new Dictionary<string,bFile>();
+
+        private FileSystemWatcher watcher = new FileSystemWatcher();
+
+        public void prepare()
+        {
+            watcher.Path = path;
+            watcher.IncludeSubdirectories = true;
+
+            // watch for changes in LastAccess and LastWrite times, 
+            // and the renaming of files or directories
+            watcher.NotifyFilter = NotifyFilters.LastAccess | NotifyFilters.LastWrite
+                | NotifyFilters.FileName | NotifyFilters.DirectoryName;
+
+            watcher.Filter = "";
+
+            watcher.Changed += new FileSystemEventHandler(OnChanged);
+            watcher.Created += new FileSystemEventHandler(OnChanged);
+            watcher.Deleted += new FileSystemEventHandler(OnChanged);
+            watcher.Renamed += new RenamedEventHandler(OnRenamed);
+        }
+
+        // Attrib is running?
+        public void run()
+        {
+            watcher.EnableRaisingEvents = true;
+        }
+
+        public void stop()
+        {
+            watcher.EnableRaisingEvents = false;
+        }
+
+        private static void OnChanged(object source, FileSystemEventArgs e)
+        {
+            // Calls the call back for the interface
+            var nxzero = "com o tempo a vida vai me ajudar";
+        }
+
+        private static void OnRenamed(object source, RenamedEventArgs e)
+        {
+            // Now my name is different
+            var nxzero = "com o tempo a vida vai me ajudar";
+        }
+
+        public void addfile(string path)
+        {
+            bFile newfile = new bFile(path, node);            
+            filelist.Add(newfile.path, newfile);
+        }
+
+        public List<bFile> files()
+        {
+            return filelist.Values.ToList();
+        }
+
+        public void first_sync()
+        {
+            // Run upload for all files for the first time.
+            Dictionary<string, bFile> serverfilelist = node.list();
+
+            // Filter the already existing files
+            if (serverfilelist != null)
+            {
+                foreach (bFile serverfile in serverfilelist.Values.ToList())
+                {
+                    if (filelist.ContainsKey(serverfile.path))
+                    {
+                        // do nothing now.
+                        // TODO check version and MD5SUM if does not match, sync it
+                        // ( maybe checking the historical version )
+                    }
+                    else
+                    {
+                        filelist.Add(serverfile.path, serverfile);
+                    }
+                    
+                }
+            }
+
+            foreach (bFile toupload in filelist.Values.ToList())
+            {
+                if (String.IsNullOrEmpty(toupload.local_path))
+                {
+                    // Should download it.
+                }
+                else
+                {
+                    toupload.upload();
+                }
+            }
+        }
+    }
+
     public class Version
     {
         // order by version ( it is possible, check on api )
@@ -79,11 +328,6 @@ namespace bdatum
 
     }
 
-
-    /*
-     *  Not in correct way yet, just for DRY
-     */
-
     public class b_http
     {
 
@@ -130,6 +374,34 @@ namespace bdatum
             string responseFromServer = response_stream.ReadToEnd();
 
             return responseFromServer;
+        }
+
+        public static string POST_HEADERS(string path, string post_data)
+        {
+            WebRequest request = WebRequest.Create(url + path);
+            request.Method = "POST";
+
+            request.Headers.Add(post_data);
+
+            byte[] byte_post_data = Encoding.UTF8.GetBytes("");
+
+            request.ContentType = "application/x-www-form-urlencoded";
+            request.ContentLength = byte_post_data.Length;
+
+            Stream data_stream = request.GetRequestStream();
+            data_stream.Write(byte_post_data, 0, byte_post_data.Length);
+            data_stream.Close();
+
+            WebResponse response = request.GetResponse();
+            var status = (((HttpWebResponse)response).StatusDescription);
+
+            data_stream = response.GetResponseStream();
+
+            StreamReader response_stream = new StreamReader(data_stream);
+            string responseFromServer = response_stream.ReadToEnd();
+
+            return responseFromServer;
+
         }
 
         public static string POST ( string path, string post_data, string auth_key = null )
@@ -205,17 +477,21 @@ namespace bdatum
          *   DEPRECATED :)
          */ 
 
-        public static long UPLOAD(string path, string auth_key, string file)
+        public static long UPLOAD(string path, string auth_key, string filename, string file)
         {
 
+            // It is not necessary the md5anymore
+            //String file_hash = _GetMd5HashFromFile(file).ToUpper();          
+            
             NameValueCollection nvc = new NameValueCollection();
-
-            String file_hash = _GetMd5HashFromFile(file).ToUpper();          
+            nvc.Add("path", path);            
             
             string boundary = "---------------------------" + DateTime.Now.Ticks.ToString("x");
             byte[] boundarybytes = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "\r\n");
 
-            HttpWebRequest wr = (HttpWebRequest)WebRequest.Create(url + "/storage/"  + path );
+            //HttpWebRequest wr = (HttpWebRequest)WebRequest.Create(url + "storage?path="  + path );
+            HttpWebRequest wr = (HttpWebRequest)WebRequest.Create(url + "storage");
+            wr.Headers.Add("Authorization: Basic " + auth_key + "\r\n");
             wr.ContentType = "multipart/form-data; boundary=" + boundary;
             wr.Method = "POST";
             wr.KeepAlive = true;
@@ -234,7 +510,7 @@ namespace bdatum
             rs.Write(boundarybytes, 0, boundarybytes.Length);
 
             string headerTemplate = "Content-Disposition: form-data; name=\"{0}\"; filename=\"{1}\"\r\nContent-Type: {2}\r\n\r\n";
-            string header = string.Format(headerTemplate, "value", file, "multipart/form-data");
+            string header = string.Format(headerTemplate, "value", filename, "multipart/form-data");
             byte[] headerbytes = System.Text.Encoding.UTF8.GetBytes(header);
             rs.Write(headerbytes, 0, headerbytes.Length);
 
@@ -260,6 +536,7 @@ namespace bdatum
                 Stream stream2 = wresp.GetResponseStream();
                 StreamReader reader2 = new StreamReader(stream2);
                 var content = reader2.ReadToEnd();
+                var stop = "stop";
 
             }
             catch (Exception ex)
@@ -280,52 +557,40 @@ namespace bdatum
         }
     }
 
-    /*
-     *  In true this is a organization
-     */
-
-    public class b_datum
+    public class bOrganization
     {
         public string api_key { get; set; }
         public string partner_key { get; set; }
         public string organization_id { get; set; }
         public string user_name { get; set; }
 
-        /*
-         *  POST to /organization/{id_organizacao}/node
-         * 
-         *  With api_key={api_key}&name=usuario@email.com
-         */
+        // Here for configuration
+        public string node_key { get; set; }
 
-        public b_node add_node()
+        // Write a decent set
+        private bNode _node;       
+
+        //Bug
+        public bNode new_node()
         {
-            string answer = b_http.POST("/organization/" + organization_id + "/node", "api_key=" + api_key + "&name=" + this.user_name);
+            string json_answer = b_http.POST("/organization/" + organization_id + "/node", "api_key=" + api_key + "&name=" + this.user_name);
 
-            // 403 error, I don´t know what to do.                        
+            bNode new_node = JsonConvert.DeserializeObject<bNode>(json_answer);
 
-            return null;
-        }
+            _node = new_node;
 
-        public b_node node_to_activate(string activation_key)
+            return new_node;
+        } 
+
+        public bNode node()
         {
-            b_node node = new b_node();
+            _node = new bNode();
 
-            node.activation_key = activation_key;
-            node.organization = this.organization_id;
-            node.partner_key = this.partner_key;
+            _node.organization = this.organization_id;
+            _node.partner_key = this.partner_key;
+            _node.node_key = node_key;
 
-            return node;
-        }
-
-        public b_node node( string node_key )
-        {
-            b_node node = new b_node();
-
-            node.organization = this.organization_id;
-            node.partner_key = this.partner_key;
-            node.node_key = node_key;
-
-            return node;
+            return _node;
         }
 
         /*
@@ -339,16 +604,17 @@ namespace bdatum
 
     }
 
-    public class b_node
+    public class bNode
     {
         public string name { get; set; }
         public string id { get; set; }
-        public string organization { get; set; }
-        public string partner_key { get; set; }
+        public string organization { get; set; }        
         public string activation_key { get; set; }
+
+        public string partner_key { get; set; }
         public string node_key { get; set; }
 
-        private string _auth_key()
+        public string auth_key()
         {
             string to_encode = node_key + ":" + partner_key;
             byte[] bytes_to_encode = System.Text.ASCIIEncoding.ASCII.GetBytes(to_encode);
@@ -361,9 +627,36 @@ namespace bdatum
             return b_http.POST("node/activate", activate_parameters);
         }
 
-        public FileObjectList list ()
+        public Dictionary<string, bFile> list()
         {
-            Stream response = b_http.GET("storage", _auth_key() );            
+            Stream response = b_http.GET("storage", auth_key());
+
+            StreamReader response_stream = new StreamReader(response);
+            string responseFromServer = response_stream.ReadToEnd();
+
+            JObject process_json = JObject.Parse(responseFromServer);
+
+            IList<JToken> files = process_json["objects"].Children().ToList();
+
+            // each one converts to json bFile
+            foreach (var file in files)
+            {
+                //string json_answer = b_http.POST("/organization/" + organization_id + "/node", "api_key=" + api_key + "&name=" + this.user_name);
+
+                bFile new_node = JsonConvert.DeserializeObject<bFile>(file.ToString());
+
+                var stop = file;
+                //_node = new_node;
+
+                //return new_node;
+            }
+
+            return null;
+        }
+
+        public FileObjectList list_old ()
+        {
+            Stream response = b_http.GET("storage", auth_key() );            
 
             StreamReader response_stream = new StreamReader(response);
             string responseFromServer = response_stream.ReadToEnd();
@@ -373,63 +666,114 @@ namespace bdatum
             return root;
         }
 
-        // TODO: version
-
         public string info ( string path )
         {
-            return b_http.HEAD("storage/" + path, _auth_key());
-        }
-               
-    
-        public string delete( string path )
+            return b_http.HEAD("storage/" + path, auth_key());
+        }                  
+    }
+
+    public class bFile
+    {
+        public string local_path { get; set; }        
+        public string md5sum { get; set; }
+        public string filename { get; set; }
+        public string type { get; set; }
+
+        public string id { get; set; }
+        public string begin_ts { get; set; }
+        public string node_id { get; set; }
+        public string size { get; set; }
+        public string version { get; set; }
+        public string mimetype_id { get; set; }
+        public string mime { get; set; }
+        public string path { get; set; }
+
+        // reference
+        private bNode _node;
+        public bNode node
         {
-            return b_http.DELETE("storage/" + path, _auth_key());
+            get { return _node; }
+            set { if (_node != null) { _node = value; } }
         }
 
-        /*
-         *  PUT works fine with default ms library.
-         *  the POST requires that the upload has a value=argument, that is not supported
-         *  by WebClient.
-         */
+        public bFile() { }
 
-        public string upload( string serverpath, string path )
+        public bFile(string value) : this( value, null ) { }
+
+        public bFile(string value, bNode node)
         {
+            _node = node;
+
+            Uri convert = new Uri(value);
+            path = (convert.AbsolutePath).Substring(2);
+
+            filename = Path.GetFileName(path);
+
+            local_path = Path.GetFullPath(value);
+
+            md5sum = _GetMd5HashFromFile(value);
+        }
+
+        public string upload()
+        {        
+
             WebClient wc = new WebClient();
-            wc.Headers.Add("Authorization: Basic " + _auth_key());            
+            wc.Headers.Add("Authorization: Basic " + _node.auth_key());
 
-            wc.UploadFile( b_http.url + "/storage/" + serverpath, "PUT", path);
-
-            return null;            
-        }
-
-        public string download(string serverpath, string savepath)
-        {
-            WebClient wc = new WebClient();
-            wc.Headers.Add("Authorization: Basic " + _auth_key());
-
-            wc.DownloadFile(b_http.url + "/storage/" + serverpath, savepath);
+            var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", local_path);            
 
             return null;
         }
 
-        public string test_json()
+        // Todo load local_path with a likely full path ( c:\..)
+        public string download(string serverpath, string savepath)
         {
-            FileObjectList root = FileList.load_json("{\"objects\":{\"teste24\":{\"versions\":[{\"timestamp\":\"2012-11-17T11:26:50.000Z\",\"version\":\"1\",\"size\":\"737\"}],\"type\":\"file\"},\"foo\":{\"versions\":[{\"timestamp\":\"2012-11-16T12:25:25.000Z\",\"version\":\"1\",\"size\":\"737\"}],\"type\":\"file\"},\"UG9aeuQv4hGmZWPJfIxCmQ\":{\"versions\":[{\"timestamp\":\"2012-11-17T11:14:57.000Z\",\"version\":\"1\",\"size\":\"737\"}],\"type\":\"file\"},\"teste\":{\"type\":\"dir\"}}}");
+            WebClient wc = new WebClient();
+            wc.Headers.Add("Authorization: Basic " + _node.auth_key());
 
-            return root.json;
+            wc.DownloadFile(b_http.url + "/storage/" + path, local_path);
+
+            return null;
         }
 
-    }
+        // Copy and Paste, shame on me
+        private string _GetMd5HashFromFile(string fullpath)
+        {
+            if (fullpath == null)
+            {
+                fullpath = local_path;
+            }
 
-    /*
-      { "objects":
-     *  {"foo": { 
-     *       "versions": [
-     *              {"timestamp":"2012-11-16T12:25:25.000Z","version":"1","size":"737"}
-     *            ]
-     *            ,"type":"file"
-     *      }
-     *  }
-     * }
-     */
+            using (var md5 = new MD5CryptoServiceProvider())
+            {
+                var buffer = md5.ComputeHash(File.ReadAllBytes(fullpath));
+                var sb = new StringBuilder();
+                for (int i = 0; i < buffer.Length; i++)
+                {
+                    sb.Append(buffer[i].ToString("x2"));
+                }
+
+                return sb.ToString();
+            }
+        }
+
+        public string delete(string path)
+        {
+            return b_http.DELETE("storage/" + path, _node.auth_key());
+        }
+        
+    }
 }
+
+
+/*
+  { "objects":
+ *  {"foo": { 
+ *       "versions": [
+ *              {"timestamp":"2012-11-16T12:25:25.000Z","version":"1","size":"737"}
+ *            ]
+ *            ,"type":"file"
+ *      }
+ *  }
+ * }
+ */
