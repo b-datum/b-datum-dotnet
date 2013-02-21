@@ -172,6 +172,13 @@ namespace bdatum
         public string path { get; set; }
         public bNode node { get; set; }
 
+        public event EventHandler Updated;
+        protected virtual void OnUpdated(EventArgs e)
+        {
+            if (Updated != null)
+                Updated(this, e);
+        }
+
         // local path in absolute
         private Dictionary<string, bFile> filelist = new Dictionary<string,bFile>();
 
@@ -194,7 +201,6 @@ namespace bdatum
             watcher.Deleted += new FileSystemEventHandler(OnChanged);
             watcher.Renamed += new RenamedEventHandler(OnRenamed);
         }
-
         // Attrib is running?
         public void run()
         {
@@ -206,16 +212,37 @@ namespace bdatum
             watcher.EnableRaisingEvents = false;
         }
 
-        private static void OnChanged(object source, FileSystemEventArgs e)
+        private void OnChanged(object source, FileSystemEventArgs e)
         {
             // Calls the call back for the interface
-            var nxzero = "com o tempo a vida vai me ajudar";
+            if (e.ChangeType.ToString() == "Created")
+            {                
+                // Refactor add
+                bFile newfile = new bFile(e.FullPath, node);
+                filelist.Add(newfile.path, newfile);
+                filelist[newfile.path].upload();
+                
+            }
+
+            if (e.ChangeType.ToString() == "Deleted")
+            {
+                //filelist[e.FullPath].delete();
+            }
+
+            if (e.ChangeType.ToString() == "Changed")
+            {
+                // Class method for return just paths
+                bFile newfile = new bFile(e.FullPath, node); 
+                filelist[newfile.path].upload();
+            }
+            OnUpdated(EventArgs.Empty);
         }
 
-        private static void OnRenamed(object source, RenamedEventArgs e)
+        private  void OnRenamed(object source, RenamedEventArgs e)
         {
             // Now my name is different
-            var nxzero = "com o tempo a vida vai me ajudar";
+            OnUpdated(EventArgs.Empty);
+            
         }
 
         public void addfile(string path)
@@ -226,18 +253,12 @@ namespace bdatum
 
         public List<bFile> files()
         {
-            return filelist.Values.ToList();
-        }
+            return filelist.Values.ToList();            
+        }         
 
-        public void first_sync()
+        public void syncFileList(string path = "/")
         {
-            // Run upload for all files for the first time.
-            Dictionary<string, bFile> serverfilelist = node.list();
-
-            // Filter the already existing files
-            if (serverfilelist != null)
-            {
-                foreach (bFile serverfile in serverfilelist.Values.ToList())
+                foreach (bFile serverfile in node.list(path))
                 {
                     if (filelist.ContainsKey(serverfile.path))
                     {
@@ -247,12 +268,20 @@ namespace bdatum
                     }
                     else
                     {
-                        filelist.Add(serverfile.path, serverfile);
+                        if (serverfile.path.Substring((serverfile.path.Length - 1)) == "/")
+                        {
+                            syncFileList(serverfile.path);
+                        }                                               
+                        filelist.Add(serverfile.path, serverfile);                      
                     }
-                    
-                }
-            }
 
+                }
+        }
+
+        // Pseudo bug, always do it on c:\ ( should think about later )
+        // Upload all files that are local.
+        public void first_sync()
+        {       
             foreach (bFile toupload in filelist.Values.ToList())
             {
                 if (String.IsNullOrEmpty(toupload.local_path))
@@ -264,68 +293,8 @@ namespace bdatum
                     toupload.upload();
                 }
             }
+            OnUpdated(EventArgs.Empty);
         }
-    }
-
-    public class Version
-    {
-        // order by version ( it is possible, check on api )
-        public string timestamp { get; set; }        
-        public string version { get; set; }
-        public string size { get; set; }
-    }
-
-    public class VersionList
-    {
-        public List<Version> versions { get; set; }
-        public string type { get; set; }
-    }
-
-    public class FileObject
-    {
-        public VersionList versions { get; set; }
-        public string name { get; set; }        
-    }
-
-    public class FileObjectList
-    {
-        public List<FileObject> objects { get; set; }
-        public string json { get; set; }
-    }
-
-    public static class FileList
-    {
-
-        public static FileObjectList load_json( string root_json )
-        {
-            FileObjectList root = new FileObjectList();
-            root.objects = new List<FileObject>();
-            root.json = root_json;
-
-            JObject process_json = JObject.Parse(root_json);
-
-            IList<JToken> files = process_json["objects"].Children().ToList();
-
-            foreach (JProperty file in files)
-            {
-                string name = file.Name;
-                string json = file.Value.ToString();
-
-                FileObject fileObject = new FileObject();
-                fileObject.name = name;
-
-                //VersionList
-                VersionList fileVersions = JsonConvert.DeserializeObject<VersionList>(json);
-                
-                fileObject.versions = fileVersions;
-
-                root.objects.Add(fileObject);
-            }            
-                     
-            return root;            
-
-        }
-
     }
 
     public class b_http
@@ -477,19 +446,15 @@ namespace bdatum
          *   DEPRECATED :)
          */ 
 
-        public static long UPLOAD(string path, string auth_key, string filename, string file)
-        {
-
-            // It is not necessary the md5anymore
-            //String file_hash = _GetMd5HashFromFile(file).ToUpper();          
+        public static long POST_PATH(string path, string auth_key)
+        {  
             
             NameValueCollection nvc = new NameValueCollection();
             nvc.Add("path", path);            
             
             string boundary = "---------------------------" + DateTime.Now.Ticks.ToString("x");
             byte[] boundarybytes = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "\r\n");
-
-            //HttpWebRequest wr = (HttpWebRequest)WebRequest.Create(url + "storage?path="  + path );
+            
             HttpWebRequest wr = (HttpWebRequest)WebRequest.Create(url + "storage");
             wr.Headers.Add("Authorization: Basic " + auth_key + "\r\n");
             wr.ContentType = "multipart/form-data; boundary=" + boundary;
@@ -509,10 +474,11 @@ namespace bdatum
             }
             rs.Write(boundarybytes, 0, boundarybytes.Length);
 
+            /*
             string headerTemplate = "Content-Disposition: form-data; name=\"{0}\"; filename=\"{1}\"\r\nContent-Type: {2}\r\n\r\n";
             string header = string.Format(headerTemplate, "value", filename, "multipart/form-data");
             byte[] headerbytes = System.Text.Encoding.UTF8.GetBytes(header);
-            rs.Write(headerbytes, 0, headerbytes.Length);
+            rs.Write(headerbytes, 0, headerbytes.Length);            
 
             FileStream fileStream = new FileStream(file, FileMode.Open, FileAccess.Read);
             byte[] buffer = new byte[4096];
@@ -522,6 +488,7 @@ namespace bdatum
                 rs.Write(buffer, 0, bytesRead);
             }
             fileStream.Close();
+            */
 
             byte[] trailer = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
             rs.Write(trailer, 0, trailer.Length);
@@ -627,9 +594,9 @@ namespace bdatum
             return b_http.POST("node/activate", activate_parameters);
         }
 
-        public Dictionary<string, bFile> list()
+        public List<bFile> list(string path = "/")
         {
-            Stream response = b_http.GET("storage", auth_key());
+            Stream response = b_http.GET("storage?path=" + path, auth_key());
 
             StreamReader response_stream = new StreamReader(response);
             string responseFromServer = response_stream.ReadToEnd();
@@ -638,6 +605,8 @@ namespace bdatum
 
             IList<JToken> files = process_json["objects"].Children().ToList();
 
+            List<bFile> fileslist = new List<bFile>();
+
             // each one converts to json bFile
             foreach (var file in files)
             {
@@ -645,13 +614,10 @@ namespace bdatum
 
                 bFile new_node = JsonConvert.DeserializeObject<bFile>(file.ToString());
 
-                var stop = file;
-                //_node = new_node;
-
-                //return new_node;
+                fileslist.Add(new_node);
             }
 
-            return null;
+            return fileslist;
         }
 
         public FileObjectList list_old ()
@@ -669,7 +635,25 @@ namespace bdatum
         public string info ( string path )
         {
             return b_http.HEAD("storage/" + path, auth_key());
-        }                  
+        }
+
+        public string createpath(string path)
+        {
+            //string[] directories = path.Split(Path.DirectorySeparatorChar);
+            string[] directories = path.Split('/');
+            string build_path = "";
+
+            foreach (string directory in directories)
+            {
+                build_path += directory + "/";
+
+                WebClient wc = new WebClient();
+                wc.Headers.Add("Authorization: Basic " + auth_key());
+                     
+                var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", path);
+            }
+            return null;
+        }
     }
 
     public class bFile
@@ -715,11 +699,12 @@ namespace bdatum
         }
 
         public string upload()
-        {        
+        {
+            //_node.createpath(path);
 
             WebClient wc = new WebClient();
             wc.Headers.Add("Authorization: Basic " + _node.auth_key());
-
+                        
             var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", local_path);            
 
             return null;
@@ -727,7 +712,7 @@ namespace bdatum
 
         // Todo load local_path with a likely full path ( c:\..)
         public string download(string serverpath, string savepath)
-        {
+        {            
             WebClient wc = new WebClient();
             wc.Headers.Add("Authorization: Basic " + _node.auth_key());
 
@@ -763,6 +748,71 @@ namespace bdatum
         }
         
     }
+
+    #region deprecated
+
+    public class Version
+    {
+        // order by version ( it is possible, check on api )
+        public string timestamp { get; set; }
+        public string version { get; set; }
+        public string size { get; set; }
+    }
+
+    public class VersionList
+    {
+        public List<Version> versions { get; set; }
+        public string type { get; set; }
+    }
+
+    public class FileObject
+    {
+        public VersionList versions { get; set; }
+        public string name { get; set; }
+    }
+
+    public class FileObjectList
+    {
+        public List<FileObject> objects { get; set; }
+        public string json { get; set; }
+    }
+
+    public static class FileList
+    {
+
+        public static FileObjectList load_json(string root_json)
+        {
+            FileObjectList root = new FileObjectList();
+            root.objects = new List<FileObject>();
+            root.json = root_json;
+
+            JObject process_json = JObject.Parse(root_json);
+
+            IList<JToken> files = process_json["objects"].Children().ToList();
+
+            foreach (JProperty file in files)
+            {
+                string name = file.Name;
+                string json = file.Value.ToString();
+
+                FileObject fileObject = new FileObject();
+                fileObject.name = name;
+
+                //VersionList
+                VersionList fileVersions = JsonConvert.DeserializeObject<VersionList>(json);
+
+                fileObject.versions = fileVersions;
+
+                root.objects.Add(fileObject);
+            }
+
+            return root;
+
+        }
+
+    }
+
+    #endregion
 }
 
 
