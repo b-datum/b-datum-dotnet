@@ -86,12 +86,41 @@ namespace bdatum
 
             Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
 
-            //bconfig.AppSettings.Settings.Add("api_key", oconfig.api_key);
-            bconfig.AppSettings.Settings["api_key"].Value = oconfig.api_key;
+            if( bconfig.AppSettings.Settings["api_key"] == null )
+            {
+                bconfig.AppSettings.Settings.Add("api_key", oconfig.api_key);
+            }else{
+                bconfig.AppSettings.Settings["api_key"].Value = oconfig.api_key;
+            }
 
-            bconfig.AppSettings.Settings["organization_id"].Value = oconfig.organization_id;
-            bconfig.AppSettings.Settings["partner_key"].Value = oconfig.partner_key;
-            bconfig.AppSettings.Settings["user_name"].Value = oconfig.user_name;
+            if (bconfig.AppSettings.Settings["organization_id"] == null )
+            {
+                bconfig.AppSettings.Settings.Add("organization_id", oconfig.organization_id );
+            }
+            else
+            {
+                bconfig.AppSettings.Settings["organization_id"].Value = oconfig.organization_id;
+            }
+                
+                
+
+            if( bconfig.AppSettings.Settings["partner_key"] == null )
+            {
+                bconfig.AppSettings.Settings.Add("partner_key", oconfig.partner_key );
+            }
+            else
+            {
+                bconfig.AppSettings.Settings["partner_key"].Value = oconfig.partner_key;
+            }
+
+            if (bconfig.AppSettings.Settings["user_name"] == null)
+            {
+                bconfig.AppSettings.Settings.Add("user_name", oconfig.user_name);
+            }
+            else
+            {
+                bconfig.AppSettings.Settings["user_name"].Value = oconfig.user_name;
+            }
 
             if (bconfig.AppSettings.Settings["node_key"] == null)
             {
