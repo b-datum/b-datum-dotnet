@@ -213,6 +213,7 @@ namespace bdatum
 
         private FileSystemWatcher watcher = new FileSystemWatcher();
 
+        // Constructor?
         public void prepare()
         {
             watcher.Path = path;
@@ -270,8 +271,17 @@ namespace bdatum
         private  void OnRenamed(object source, RenamedEventArgs e)
         {
             // Now my name is different
-            OnUpdated(EventArgs.Empty);
-            
+            OnUpdated(EventArgs.Empty);            
+        }
+
+        public void readlocaldir()
+        {
+            string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
+
+            foreach (string file in files)
+            {
+                this.addfile(file);
+            }
         }
 
         public void addfile(string path)
@@ -291,6 +301,18 @@ namespace bdatum
                 {
                     if (filelist.ContainsKey(serverfile.path))
                     {
+                        bFile localfile = filelist[serverfile.path];
+                        serverfile.info();
+
+                        if (serverfile.ETag == localfile.ETag)
+                        {
+                            var icecube = "today was a good day";
+                        }
+                        else
+                        {
+                            var icecube = "today was a good day";
+                        }
+
                         // do nothing now.
                         // TODO check version and MD5SUM if does not match, sync it
                         // ( maybe checking the historical version )
@@ -355,6 +377,11 @@ namespace bdatum
             //return responseFromServer;            
         }
 
+
+        /*
+         *  Returns a dictionaty of values on the header response
+         *  Since the body is empty, it is hard to serialize now
+         */ 
         public static string HEAD(string path, string auth_key)
         {
             WebRequest request = WebRequest.Create(url + path);
@@ -641,9 +668,9 @@ namespace bdatum
             {
                 //string json_answer = b_http.POST("/organization/" + organization_id + "/node", "api_key=" + api_key + "&name=" + this.user_name);
 
-                bFile new_node = JsonConvert.DeserializeObject<bFile>(file.ToString());
-
-                fileslist.Add(new_node);
+                bFile new_file = JsonConvert.DeserializeObject<bFile>(file.ToString());
+                new_file.node = this;
+                fileslist.Add(new_file);
             }
 
             return fileslist;
@@ -688,7 +715,7 @@ namespace bdatum
     public class bFile
     {
         public string local_path { get; set; }        
-        public string md5sum { get; set; }
+        public string ETag { get; set; }
         public string filename { get; set; }
         public string type { get; set; }
 
@@ -706,7 +733,7 @@ namespace bdatum
         public bNode node
         {
             get { return _node; }
-            set { if (_node != null) { _node = value; } }
+            set { if (_node == null) { _node = value; } }
         }
 
         public bFile() { }
@@ -724,7 +751,7 @@ namespace bdatum
 
             local_path = Path.GetFullPath(value);
 
-            md5sum = _GetMd5HashFromFile(value);
+            ETag = _GetMd5HashFromFile(value);
         }
 
         public string upload()
@@ -775,7 +802,19 @@ namespace bdatum
         {
             return b_http.DELETE("storage/" + path, _node.auth_key());
         }
-        
+
+        public void info()
+        {
+            string info = b_http.HEAD("storage?path=" + path, _node.auth_key());
+            bFileInfo fileinfo = JsonConvert.DeserializeObject<bFileInfo>(info);
+            ETag = fileinfo.Etag;
+        }        
+    }
+
+    public class bFileInfo
+    {
+        public string Date { get; set; }
+        public string Etag { get; set; }        
     }
 
     #region deprecated
