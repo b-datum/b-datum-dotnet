@@ -23,57 +23,6 @@ namespace bdatum
 {
     #region Configuration
 
-    public class bdatumConfig : ConfigurationElement
-    {
-        public bdatumConfig() { }
-
-        public bdatumConfig(string api_key, string partner_key, string organization_id, string user_name)
-        {
-
-        }
-
-        [ConfigurationProperty("api_key", DefaultValue = "", IsRequired = true)]
-        public string Api_Key
-        {
-            get
-            {
-                return (string)this["api_key"];
-            }
-            set
-            {
-                this["api_key"] = value;
-            }
-        }
-
-        [ConfigurationProperty("partner_key", DefaultValue = "", IsRequired = true)]
-        public string Partner_Key
-        {
-            get
-            {
-                return (string)this["partner_key"];
-            }
-            set
-            {
-                this["partner_key"] = value;
-            }
-        }
-        [ConfigurationProperty("organization_id", DefaultValue = "", IsRequired = true)]
-        public string Organization_ID
-        {
-            get
-            {
-                return (string)this["organization_id"];
-            }
-            set
-            {
-                this["organization_id"] = value;
-            }
-        }
-        //[ConfigurationProperty("user_name", DefaultValue = "", IsRequired=true)]
-
-
-    }
-
     public static class bdatumConfigManager
     {
         public static void SaveSettings(bOrganization oconfig)
@@ -100,9 +49,7 @@ namespace bdatum
             else
             {
                 bconfig.AppSettings.Settings["organization_id"].Value = oconfig.organization_id;
-            }
-                
-                
+            }               
 
             if( bconfig.AppSettings.Settings["partner_key"] == null )
             {
@@ -176,6 +123,52 @@ namespace bdatum
 
         }
 
+        public static void SavePath(string path)
+        {
+            Configuration roamingConfig =
+    ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+
+            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
+            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
+
+            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
+
+            if (bconfig.AppSettings.Settings["backupPath"] == null)
+            {
+                bconfig.AppSettings.Settings.Add("backupPath", path);
+            }
+            else
+            {
+                bconfig.AppSettings.Settings["backupPath"].Value = path;
+            }
+
+            bconfig.Save();
+            //config.Save(ConfigurationSaveMode.Modified);
+
+            string sectionName = "appSettings";
+            ConfigurationManager.RefreshSection(sectionName);
+        }
+
+        public static string LoadPath()
+        {
+            Configuration roamingConfig =
+             ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+
+            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
+            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
+
+            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
+
+            if (bconfig.AppSettings.Settings["backupPath"] != null)
+            {
+                return bconfig.AppSettings.Settings["backupPath"].Value;
+            }
+            else
+            {
+                return null;
+            }
+        }
+
         public static void _LoadFileSettings()
         {
 #if DEBUG
@@ -200,6 +193,7 @@ namespace bdatum
     {
         public string path { get; set; }
         public bNode node { get; set; }
+        private bool _IsRunning { get; set; }
 
         public event EventHandler Updated;
         protected virtual void OnUpdated(EventArgs e)
@@ -235,11 +229,18 @@ namespace bdatum
         public void run()
         {
             watcher.EnableRaisingEvents = true;
+            _IsRunning = true;
         }
 
         public void stop()
         {
             watcher.EnableRaisingEvents = false;
+            _IsRunning = false;
+        }
+
+        public bool IsRunning()
+        {
+            return _IsRunning;
         }
 
         private void OnChanged(object source, FileSystemEventArgs e)
@@ -282,6 +283,8 @@ namespace bdatum
             {
                 this.addfile(file);
             }
+
+            OnUpdated(EventArgs.Empty);
         }
 
         public void addfile(string path)
@@ -299,34 +302,36 @@ namespace bdatum
         {
                 foreach (bFile serverfile in node.list(path))
                 {
+                    if (!serverfile.IsDirectory())
+                    {
+                        serverfile.info();
+                    }
                     if (filelist.ContainsKey(serverfile.path))
                     {
                         bFile localfile = filelist[serverfile.path];
-                        serverfile.info();
-
+   
                         if (serverfile.ETag == localfile.ETag)
                         {
-                            var icecube = "today was a good day";
+                            serverfile.status = "done";
                         }
                         else
                         {
-                            var icecube = "today was a good day";
+                            serverfile.status = "uploading";
+                            // ADD to upload queue
                         }
-
-                        // do nothing now.
-                        // TODO check version and MD5SUM if does not match, sync it
-                        // ( maybe checking the historical version )
+                        OnUpdated(EventArgs.Empty);
                     }
                     else
                     {
-                        if (serverfile.path.Substring((serverfile.path.Length - 1)) == "/")
+                        if (serverfile.IsDirectory())
                         {
                             syncFileList(serverfile.path);
-                        }                                               
-                        filelist.Add(serverfile.path, serverfile);                      
+                        }
+                        serverfile.status = "done"; // Deleting
+                        filelist.Add(serverfile.path, serverfile);
+                        OnUpdated(EventArgs.Empty);
                     }
-
-                }
+                }            
         }
 
         // Pseudo bug, always do it on c:\ ( should think about later )
@@ -728,6 +733,20 @@ namespace bdatum
         public string mime { get; set; }
         public string path { get; set; }
 
+        /* Status: 
+         * processing ( first appears, local or remote )
+         * local ( it is local , not in sync )
+         * uploading ( it is uploading )
+         * deleting ( say it )
+         * done ( it is in sync )
+         * 
+         * remote ( only remote )
+         * downloading ( only remote, downloading it valid for first sync )
+
+         */
+
+        public string status { get; set; }
+
         // reference
         private bNode _node;
         public bNode node
@@ -736,7 +755,10 @@ namespace bdatum
             set { if (_node == null) { _node = value; } }
         }
 
-        public bFile() { }
+        public bFile() 
+        {
+            status = "done";
+        }
 
         public bFile(string value) : this( value, null ) { }
 
@@ -752,6 +774,20 @@ namespace bdatum
             local_path = Path.GetFullPath(value);
 
             ETag = _GetMd5HashFromFile(value);
+
+            status = "done";
+        }
+
+        public bool IsDirectory()
+        {
+            if (this.path.Substring((this.path.Length - 1)) == "/")
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
         }
 
         public string upload()
@@ -805,9 +841,19 @@ namespace bdatum
 
         public void info()
         {
-            string info = b_http.HEAD("storage?path=" + path, _node.auth_key());
-            bFileInfo fileinfo = JsonConvert.DeserializeObject<bFileInfo>(info);
-            ETag = fileinfo.Etag;
+            WebRequest request = WebRequest.Create( b_http.url + "storage?path=" + path);
+            request.Method = "HEAD";
+
+            string authotization_header = ("Authorization: Basic " + node.auth_key());
+            request.Headers.Add(authotization_header);
+
+            WebResponse response = request.GetResponse();
+
+            if (response.Headers.AllKeys.Contains("ETag"))
+            {
+                ETag = response.Headers["ETag"];
+            }
+            
         }        
     }
 
