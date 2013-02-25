@@ -1,12 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 
 using System.IO;
 using System.Net;
 using System.Runtime.Serialization;
-using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 
 using Newtonsoft;
@@ -17,7 +15,8 @@ using System.Configuration;
 using System.Collections;
 using System.Collections.Specialized;
 
-using RestSharp;
+//It seems to need a higher dot net version
+//using RestSharp;
 
 namespace bdatum
 {
@@ -295,7 +294,8 @@ namespace bdatum
 
         public List<bFile> files()
         {
-            return filelist.Values.ToList();            
+            var u =  filelist.Values;
+            return null;
         }         
 
         public void syncFileList(string path = "/")
@@ -338,14 +338,16 @@ namespace bdatum
         // Upload all files that are local.
         public void first_sync()
         {       
-            foreach (bFile toupload in filelist.Values.ToList())
+            foreach (bFile toupload in filelist.Values)
             {
                 if (String.IsNullOrEmpty(toupload.local_path))
                 {
                     // Should download it.
+                    // Not on first sync
                 }
                 else
                 {
+                    // Add toupload to queue list
                     toupload.upload();
                 }
             }
@@ -664,12 +666,12 @@ namespace bdatum
 
             JObject process_json = JObject.Parse(responseFromServer);
 
-            IList<JToken> files = process_json["objects"].Children().ToList();
+            //IList<JToken> files = process_json["objects"].Children();
 
             List<bFile> fileslist = new List<bFile>();
 
             // each one converts to json bFile
-            foreach (var file in files)
+            foreach (var file in process_json["objects"].Children())
             {
                 //string json_answer = b_http.POST("/organization/" + organization_id + "/node", "api_key=" + api_key + "&name=" + this.user_name);
 
@@ -848,8 +850,11 @@ namespace bdatum
             request.Headers.Add(authotization_header);
 
             WebResponse response = request.GetResponse();
+            
+            // Dot net 2.0 arrays does not support directly contains
+            List<string> headers = new List<string>(response.Headers.AllKeys);
 
-            if (response.Headers.AllKeys.Contains("ETag"))
+            if (headers.Contains("ETag"))
             {
                 ETag = response.Headers["ETag"];
             }
@@ -902,9 +907,9 @@ namespace bdatum
 
             JObject process_json = JObject.Parse(root_json);
 
-            IList<JToken> files = process_json["objects"].Children().ToList();
+            //IList<JToken> files = process_json["objects"].Children();
 
-            foreach (JProperty file in files)
+            foreach (JProperty file in process_json["objects"].Children())
             {
                 string name = file.Name;
                 string json = file.Value.ToString();
