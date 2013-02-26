@@ -15,6 +15,8 @@ using System.Configuration;
 using System.Collections;
 using System.Collections.Specialized;
 
+using System.Threading;
+
 //It seems to need a higher dot net version
 //using RestSharp;
 
@@ -193,7 +195,7 @@ namespace bdatum
         public string path { get; set; }
         public bNode node { get; set; }
         private bool _IsRunning { get; set; }
-
+        
         public event EventHandler Updated;
         protected virtual void OnUpdated(EventArgs e)
         {
@@ -201,10 +203,51 @@ namespace bdatum
                 Updated(this, e);
         }
 
+        public event EventHandler AfterFirstSync;
+        protected virtual void OnAfterFirstSync(EventArgs e)
+        {
+            if (AfterFirstSync != null)
+                AfterFirstSync(this, e);
+        }
+
         // local path in absolute
         private Dictionary<string, bFile> filelist = new Dictionary<string,bFile>();
 
         private FileSystemWatcher watcher = new FileSystemWatcher();
+        private Queue<bFile> syncronize = new Queue<bFile>();
+        private bool syncronize_writing = false;
+
+        public void AddToQueue(bFile file)
+        {
+            lock (this)
+            {
+                syncronize.Enqueue(file); 
+            }
+        }
+
+        public void Syncronizer()
+        {
+            lock (this)
+            {
+                if (syncronize.Count > 0)
+                {
+                    bFile sync = syncronize.Dequeue();
+
+                    switch (sync.action)
+                    {
+                        case "upload":
+                             var mu = "mu";
+                             break;
+                        case "delete":
+                             var muu = "mu";
+                             break;
+                        default:
+                            var donothing = "nod";
+                            break;
+                    }
+                }                
+            }
+        }
 
         // Constructor?
         public void prepare()
@@ -229,6 +272,12 @@ namespace bdatum
         {
             watcher.EnableRaisingEvents = true;
             _IsRunning = true;
+
+            // Should run on a thread, never returns
+            while (_IsRunning)
+            {
+                this.Syncronizer();
+            }
         }
 
         public void stop()
@@ -248,24 +297,32 @@ namespace bdatum
             if (e.ChangeType.ToString() == "Created")
             {                
                 // Refactor add
-                bFile newfile = new bFile(e.FullPath, node);
-                filelist.Add(newfile.path, newfile);
-                filelist[newfile.path].upload();
+                bFile file_to_queue = new bFile(e.FullPath, node);                
+                filelist.Add(file_to_queue.path, file_to_queue);
+                // queue ( pointer it ? )
+                file_to_queue.action = "upload";
+                this.AddToQueue(file_to_queue);
+                //filelist[newfile.path].upload();
                 
             }
 
             if (e.ChangeType.ToString() == "Deleted")
             {
-                //filelist[e.FullPath].delete();
+                bFile file_to_queue = filelist[e.FullPath];
+                file_to_queue.action = "delete";
+                this.AddToQueue( file_to_queue ); //.delete();
             }
 
             if (e.ChangeType.ToString() == "Changed")
             {
                 // Class method for return just paths
-                bFile newfile = new bFile(e.FullPath, node); 
-                filelist[newfile.path].upload();
+                bFile file_to_queue = new bFile(e.FullPath, node);
+                file_to_queue.action = "upload";
+                this.AddToQueue(file_to_queue);
+                //filelist[file_to_queue.path].upload();
             }
-            OnUpdated(EventArgs.Empty);
+            // This event is trigged now by the sincronize
+            //OnUpdated(EventArgs.Empty);
         }
 
         private  void OnRenamed(object source, RenamedEventArgs e)
@@ -294,8 +351,12 @@ namespace bdatum
 
         public List<bFile> files()
         {
-            var u =  filelist.Values;
-            return null;
+            List<bFile> files = new List<bFile>();
+            foreach (var file in filelist.Values)
+            {
+                files.Add(file);
+            }
+            return files;
         }         
 
         public void syncFileList(string path = "/")
@@ -352,6 +413,7 @@ namespace bdatum
                 }
             }
             OnUpdated(EventArgs.Empty);
+            OnAfterFirstSync(EventArgs.Empty);
         }
     }
 
@@ -726,6 +788,10 @@ namespace bdatum
         public string filename { get; set; }
         public string type { get; set; }
 
+        // bla bla bla defines what to do
+        // Dispatch table is your friend
+        public string action { get; set; }
+
         public string id { get; set; }
         public string begin_ts { get; set; }
         public string node_id { get; set; }
@@ -798,6 +864,7 @@ namespace bdatum
 
             WebClient wc = new WebClient();
             wc.Headers.Add("Authorization: Basic " + _node.auth_key());
+            wc.Headers.Add("ETag: " + this.ETag);
                         
             var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", local_path);            
 
@@ -933,16 +1000,3 @@ namespace bdatum
 
     #endregion
 }
-
-
-/*
-  { "objects":
- *  {"foo": { 
- *       "versions": [
- *              {"timestamp":"2012-11-16T12:25:25.000Z","version":"1","size":"737"}
- *            ]
- *            ,"type":"file"
- *      }
- *  }
- * }
- */
