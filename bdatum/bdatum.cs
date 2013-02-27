@@ -16,6 +16,7 @@ using System.Collections;
 using System.Collections.Specialized;
 
 using System.Threading;
+using System.Web;
 
 //It seems to need a higher dot net version
 //using RestSharp;
@@ -373,11 +374,11 @@ namespace bdatum
    
                         if (serverfile.ETag == localfile.ETag)
                         {
-                            serverfile.status = "done";
+                            serverfile.status = "Backup Done";
                         }
                         else
                         {
-                            serverfile.status = "uploading";
+                            serverfile.status = "Uploading";
                             // ADD to upload queue
                         }
                         OnUpdated(EventArgs.Empty);
@@ -388,7 +389,7 @@ namespace bdatum
                         {
                             syncFileList(serverfile.path);
                         }
-                        serverfile.status = "done"; // Deleting
+                        serverfile.status = "Remote Only"; // Deleting ( queue )
                         filelist.Add(serverfile.path, serverfile);
                         OnUpdated(EventArgs.Empty);
                     }
@@ -396,20 +397,17 @@ namespace bdatum
         }
 
         // Pseudo bug, always do it on c:\ ( should think about later )
-        // Upload all files that are local.
+        // Upload all files that are local on first attempt
         public void first_sync()
         {       
             foreach (bFile toupload in filelist.Values)
             {
-                if (String.IsNullOrEmpty(toupload.local_path))
+                if (! String.IsNullOrEmpty(toupload.local_path))
                 {
-                    // Should download it.
-                    // Not on first sync
-                }
-                else
-                {
-                    // Add toupload to queue list
+                    toupload.status = "Uploading";
+                    OnUpdated(EventArgs.Empty);
                     toupload.upload();
+                    OnUpdated(EventArgs.Empty);
                 }
             }
             OnUpdated(EventArgs.Empty);
@@ -424,7 +422,7 @@ namespace bdatum
 
         // wrap it!!!
         // TODO: make it in the correct way and wrap it!
-
+        
         public static Stream GET ( string path, string auth_key )
         {
             WebRequest request = WebRequest.Create( url + path );
@@ -825,7 +823,7 @@ namespace bdatum
 
         public bFile() 
         {
-            status = "done";
+            status = "";
         }
 
         public bFile(string value) : this( value, null ) { }
@@ -843,7 +841,7 @@ namespace bdatum
 
             ETag = _GetMd5HashFromFile(value);
 
-            status = "done";
+            status = "local";
         }
 
         public bool IsDirectory()
@@ -860,15 +858,45 @@ namespace bdatum
 
         public string upload()
         {
-            //_node.createpath(path);
 
+            // teste
             WebClient wc = new WebClient();
-            wc.Headers.Add("Authorization: Basic " + _node.auth_key());
+            //wc.Headers.Add("Authorization: Basic " + _node.auth_key());
+            wc.Headers.Add("Authorization: Basic WktZcUx6SHJUb2F5WVVlY1NNUVM6SnZkaUJlOWJIZmRCNEpLRm5HOGQ=");
             wc.Headers.Add("ETag: " + this.ETag);
-                        
-            var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", local_path);            
 
-            return null;
+            // Verify on server on how to upload files with a espace in the name
+            //string encoded_url = HttpUtility.UrlEncode(b_http.url + "storage?path=" + path);
+
+            var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", local_path);
+
+            status = "uploaded";
+
+            return status;
+            /*
+            try
+            {
+
+                WebClient wc = new WebClient();
+                wc.Headers.Add("Authorization: Basic " + _node.auth_key());
+                wc.Headers.Add("ETag: " + this.ETag);
+
+                // Verify on server on how to upload files with a espace in the name
+                //string encoded_url = HttpUtility.UrlEncode(b_http.url + "storage?path=" + path);
+
+                var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", local_path);
+
+                status = "uploaded";
+
+                return status;
+            }
+            catch( Exception e )
+            {
+                this.status = "Error when Uploading" + e.Message;                
+            }
+
+            return status;
+             */
         }
 
         // Todo load local_path with a likely full path ( c:\..)
