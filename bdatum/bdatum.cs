@@ -23,6 +23,21 @@ using System.Web;
 
 namespace bdatum
 {
+    class bWebClient : WebClient
+    {
+        protected override WebRequest GetWebRequest(Uri address)
+        {
+            WebRequest request = base.GetWebRequest(address);
+            if (request is HttpWebRequest)
+            {
+                (request as HttpWebRequest).KeepAlive = true; // ?
+                (request as HttpWebRequest).Timeout = System.Threading.Timeout.Infinite;
+            }
+
+            return base.GetWebRequest(address);
+        }
+    }
+
     #region Configuration
 
     public static class bdatumConfigManager
@@ -237,15 +252,17 @@ namespace bdatum
                     switch (sync.action)
                     {
                         case "upload":
-                             var mu = "mu";
+                             sync.upload();                            
                              break;
                         case "delete":
-                             var muu = "mu";
+                             sync.delete("ww");
                              break;
                         default:
                             var donothing = "nod";
                             break;
                     }
+
+                    OnUpdated(EventArgs.Empty);
                 }                
             }
         }
@@ -303,8 +320,7 @@ namespace bdatum
                 // queue ( pointer it ? )
                 file_to_queue.action = "upload";
                 this.AddToQueue(file_to_queue);
-                //filelist[newfile.path].upload();
-                
+                //filelist[newfile.path].upload();                
             }
 
             if (e.ChangeType.ToString() == "Deleted")
@@ -358,15 +374,21 @@ namespace bdatum
                 files.Add(file);
             }
             return files;
-        }         
+        }
 
-        public void syncFileList(string path = "/")
+        public void syncFileList()
         {
+            syncFileList("/");
+        }
+
+        public void syncFileList(string path)
+        {           
+
                 foreach (bFile serverfile in node.list(path))
                 {
                     if (!serverfile.IsDirectory())
                     {
-                        serverfile.info();
+                        //serverfile.info();
                     }
                     if (filelist.ContainsKey(serverfile.path))
                     {
@@ -431,17 +453,20 @@ namespace bdatum
             string authotization_header =  ("Authorization: Basic " + auth_key );
             request.Headers.Add( authotization_header );
 
-            WebResponse response = request.GetResponse();
-            var status = (((HttpWebResponse)response).StatusDescription);
+            try
+            {
+                WebResponse response = request.GetResponse();
+                var status = (((HttpWebResponse)response).StatusDescription);
 
-            Stream data_stream = response.GetResponseStream();
-            StreamReader response_stream = new StreamReader(data_stream);
+                Stream data_stream = response.GetResponseStream();
+                StreamReader response_stream = new StreamReader(data_stream);
 
-            return data_stream;
-
-            //string responseFromServer = response_stream.ReadToEnd();
-
-            //return responseFromServer;            
+                return data_stream;
+            }
+            catch( WebException e ) 
+            {
+                throw e;
+            }            
         }
 
 
@@ -568,83 +593,7 @@ namespace bdatum
          *   
          *   DEPRECATED :)
          */ 
-
-        public static long POST_PATH(string path, string auth_key)
-        {  
-            
-            NameValueCollection nvc = new NameValueCollection();
-            nvc.Add("path", path);            
-            
-            string boundary = "---------------------------" + DateTime.Now.Ticks.ToString("x");
-            byte[] boundarybytes = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "\r\n");
-            
-            HttpWebRequest wr = (HttpWebRequest)WebRequest.Create(url + "storage");
-            wr.Headers.Add("Authorization: Basic " + auth_key + "\r\n");
-            wr.ContentType = "multipart/form-data; boundary=" + boundary;
-            wr.Method = "POST";
-            wr.KeepAlive = true;
-            wr.Credentials = System.Net.CredentialCache.DefaultCredentials;
-
-            Stream rs = wr.GetRequestStream();
-
-            string formdataTemplate = "Content-Disposition: form-data; name=\"{0}\"\r\n\r\n{1}";
-            foreach (string key in nvc.Keys)
-            {
-                rs.Write(boundarybytes, 0, boundarybytes.Length);
-                string formitem = string.Format(formdataTemplate, key, nvc[key]);
-                byte[] formitembytes = System.Text.Encoding.UTF8.GetBytes(formitem);
-                rs.Write(formitembytes, 0, formitembytes.Length);
-            }
-            rs.Write(boundarybytes, 0, boundarybytes.Length);
-
-            /*
-            string headerTemplate = "Content-Disposition: form-data; name=\"{0}\"; filename=\"{1}\"\r\nContent-Type: {2}\r\n\r\n";
-            string header = string.Format(headerTemplate, "value", filename, "multipart/form-data");
-            byte[] headerbytes = System.Text.Encoding.UTF8.GetBytes(header);
-            rs.Write(headerbytes, 0, headerbytes.Length);            
-
-            FileStream fileStream = new FileStream(file, FileMode.Open, FileAccess.Read);
-            byte[] buffer = new byte[4096];
-            int bytesRead = 0;
-            while ((bytesRead = fileStream.Read(buffer, 0, buffer.Length)) != 0)
-            {
-                rs.Write(buffer, 0, bytesRead);
-            }
-            fileStream.Close();
-            */
-
-            byte[] trailer = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
-            rs.Write(trailer, 0, trailer.Length);
-            rs.Close();
-
-            WebResponse wresp = null;
-            try
-            {
-                // clean webbrowser                
-
-                wresp = wr.GetResponse();
-                Stream stream2 = wresp.GetResponseStream();
-                StreamReader reader2 = new StreamReader(stream2);
-                var content = reader2.ReadToEnd();
-                var stop = "stop";
-
-            }
-            catch (Exception ex)
-            {
-
-                if (wresp != null)
-                {
-                    wresp.Close();
-                    wresp = null;
-                }
-            }
-            finally
-            {
-                wr = null;
-            }
-
-            return 0;
-        }
+        
     }
 
     public class bOrganization
@@ -706,6 +655,7 @@ namespace bdatum
 
         public string auth_key()
         {
+            //return "WktZcUx6SHJUb2F5WVVlY1NNUVM6SnZkaUJlOWJIZmRCNEpLRm5HOGQ=";
             string to_encode = node_key + ":" + partner_key;
             byte[] bytes_to_encode = System.Text.ASCIIEncoding.ASCII.GetBytes(to_encode);
             return System.Convert.ToBase64String(bytes_to_encode);
@@ -742,7 +692,7 @@ namespace bdatum
 
             return fileslist;
         }
-
+        
         public FileObjectList list_old ()
         {
             Stream response = b_http.GET("storage", auth_key() );            
@@ -856,13 +806,12 @@ namespace bdatum
             }
         }
 
-        public string upload()
+        public string _upload()
         {
-
-            // teste
-            WebClient wc = new WebClient();
-            //wc.Headers.Add("Authorization: Basic " + _node.auth_key());
-            wc.Headers.Add("Authorization: Basic WktZcUx6SHJUb2F5WVVlY1NNUVM6SnZkaUJlOWJIZmRCNEpLRm5HOGQ=");
+            bWebClient wc = new bWebClient();
+            wc.Headers.Add("Authorization: Basic " + _node.auth_key());
+            // Node working
+            //wc.Headers.Add("Authorization: Basic WktZcUx6SHJUb2F5WVVlY1NNUVM6SnZkaUJlOWJIZmRCNEpLRm5HOGQ=");
             wc.Headers.Add("ETag: " + this.ETag);
 
             // Verify on server on how to upload files with a espace in the name
@@ -873,9 +822,15 @@ namespace bdatum
             status = "uploaded";
 
             return status;
-            /*
+        }
+
+        public string upload()
+        {
+
+            //return this.UPLOADNEW();
             try
             {
+                
 
                 WebClient wc = new WebClient();
                 wc.Headers.Add("Authorization: Basic " + _node.auth_key());
@@ -893,10 +848,8 @@ namespace bdatum
             catch( Exception e )
             {
                 this.status = "Error when Uploading" + e.Message;                
-            }
-
+            }            
             return status;
-             */
         }
 
         // Todo load local_path with a likely full path ( c:\..)
@@ -954,7 +907,50 @@ namespace bdatum
                 ETag = response.Headers["ETag"];
             }
             
-        }        
+        }      
+  
+        public string UPLOADNEW()
+        {  
+            string auth_key = _node.auth_key();
+
+            // ok
+            //string boundary = "----------" + DateTime.Now.Ticks.ToString("x");
+            string boundary = "xYzZY" + DateTime.Now.Ticks.ToString("x");
+            byte[] boundarybytes = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "\r\n");
+
+            HttpWebRequest upload = (HttpWebRequest)WebRequest.Create(b_http.url + "storage");
+            upload.ContentType = "multipart/form-data; boundary=" + boundary;
+            upload.Method = "POST";
+            upload.Headers.Add("Authorization: Basic " + auth_key);
+            upload.Headers.Add("ETag: " + this.ETag);                      
+
+            //upload.AllowWriteStreamBuffering = false;
+
+            Stream uploadStream = upload.GetRequestStream();
+
+            FileStream uploadFile = new FileStream(this.local_path, FileMode.Open, FileAccess.Read);
+            byte[] buffer = new Byte[4096];
+            int bytesRead = 0;
+            while (( bytesRead = uploadFile.Read(buffer, 0, buffer.Length)) != 0 )
+                uploadStream.Write(buffer, 0, bytesRead);
+            uploadFile.Close();
+
+            byte[] trailer = System.Text.Encoding.ASCII.GetBytes("\r\n==" + boundary + "--\r\n");
+            uploadStream.Write(trailer, 0, trailer.Length);
+            uploadStream.Close();
+
+            WebResponse response = upload.GetResponse();
+            Stream responseStream = response.GetResponseStream();
+            StreamReader responseStreamReader = new StreamReader(responseStream);
+            String returnString = responseStreamReader.ReadToEnd();
+
+            uploadFile.Close();
+            responseStream.Close();
+            responseStreamReader.Close();
+            uploadStream.Close();
+
+            return returnString;
+        }
     }
 
     public class bFileInfo
