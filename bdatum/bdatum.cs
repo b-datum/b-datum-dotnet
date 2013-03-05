@@ -18,6 +18,10 @@ using System.Collections.Specialized;
 using System.Threading;
 using System.Web;
 
+using SeasideResearch.LibCurlNet;
+
+using System.Diagnostics;
+
 //It seems to need a higher dot net version
 //using RestSharp;
 
@@ -736,6 +740,10 @@ namespace bdatum
         public string filename { get; set; }
         public string type { get; set; }
 
+        public long local_size { get; set; }
+
+        private List<string> chunks = new List<string>();
+
         // bla bla bla defines what to do
         // Dispatch table is your friend
         public string action { get; set; }
@@ -747,7 +755,7 @@ namespace bdatum
         public string version { get; set; }
         public string mimetype_id { get; set; }
         public string mime { get; set; }
-        public string path { get; set; }
+        public string path { get; set;} 
 
         /* Status: 
          * processing ( first appears, local or remote )
@@ -789,6 +797,9 @@ namespace bdatum
 
             local_path = Path.GetFullPath(value);
 
+            FileInfo fileinfo = new FileInfo(local_path);
+            local_size = fileinfo.Length;
+
             ETag = _GetMd5HashFromFile(value);
 
             status = "local";
@@ -804,6 +815,36 @@ namespace bdatum
             {
                 return false;
             }
+        }
+
+        public string _upload_external_curl()
+        {
+            // Verify on server on how to upload files with a espace in the name
+            //string encoded_url = HttpUtility.UrlEncode(b_http.url + "storage?path=" + path);          
+            
+            Process curl = new Process();
+
+                curl.StartInfo.UseShellExecute = false;
+                curl.StartInfo.FileName = "curl.exe";
+                curl.StartInfo.CreateNoWindow = true;
+                curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + ETag + "\" -T \"" + local_path + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "\"";
+                //curl.StartInfo.Arguments = " --version";
+                curl.StartInfo.RedirectStandardOutput = true;
+                bool started = curl.Start();
+
+                string output = curl.StandardOutput.ReadToEnd();
+                curl.WaitForExit();
+
+                if (String.IsNullOrEmpty(output))
+                {
+                    status = "uploaded";
+                    return output;
+                }
+                else
+                {
+                    status = "Upload Failed" + output;
+                    return output;
+                }
         }
 
         public string _upload()
@@ -826,12 +867,62 @@ namespace bdatum
 
         public string upload()
         {
+            if (local_size > 90 * 1024 * 1024)
+            {
+                splitfile();
 
+                Process curlinit = new Process();
+                curlinit.StartInfo.UseShellExecute = false;
+                curlinit.StartInfo.FileName = "curl.exe";
+                curlinit.StartInfo.CreateNoWindow = true;
+                curlinit.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\"" + "\" -H \"Etag: " + ETag + "\" -X POST \"" + b_http.url + "storage?path=" + path + "&multipart=1";
+                curlinit.StartInfo.RedirectStandardOutput = true;
+                curlinit.Start();
+                string answer = curlinit.StandardOutput.ReadToEnd();
+
+                bMultipartInfo multipart = JsonConvert.DeserializeObject<bMultipartInfo>(answer);
+
+                string upload_id = multipart.upload_id;
+
+                curlinit.WaitForExit();
+
+                int part = 1;
+                foreach (string chunk in chunks)
+                {
+                    string md5sum = _GetMd5HashFromFile(chunk);
+
+                    Process curl = new Process();
+
+                    curl.StartInfo.UseShellExecute = false;
+                    curl.StartInfo.FileName = "curl.exe";
+                    curl.StartInfo.CreateNoWindow = true;
+                    curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + md5sum + "\" -T \"" + chunk + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "&part=" + part.ToString() + "&upload_id="  + upload_id + "\"";
+                    //curl.StartInfo.Arguments = " --version";
+                    curl.StartInfo.RedirectStandardOutput = true;
+                    bool started = curl.Start();
+
+                    string output = curl.StandardOutput.ReadToEnd();
+                    curl.WaitForExit();
+
+                    if (String.IsNullOrEmpty(output))
+                    {
+                        status = "uploaded";
+                        return output;
+                    }
+                    else
+                    {
+                        status = "Upload Failed" + output;
+                        return output;
+                    }
+
+                    part++;
+                }
+            }
+
+            return _upload_external_curl();
             //return this.UPLOADNEW();
             try
-            {
-                
-
+            {               
                 WebClient wc = new WebClient();
                 wc.Headers.Add("Authorization: Basic " + _node.auth_key());
                 wc.Headers.Add("ETag: " + this.ETag);
@@ -850,6 +941,19 @@ namespace bdatum
                 this.status = "Error when Uploading" + e.Message;                
             }            
             return status;
+        }
+
+        public string curl_upload()
+        {
+            Easy easy = new Easy();
+
+            easy.SetOpt(CURLoption.CURLOPT_HEADER, true);
+            // Slist? 
+            easy.SetOpt(CURLoption.CURLOPT_HTTPHEADER, null);
+
+
+            return null;
+
         }
 
         // Todo load local_path with a likely full path ( c:\..)
@@ -951,12 +1055,49 @@ namespace bdatum
 
             return returnString;
         }
+
+        public void splitfile()
+        {
+            string temp_path = System.IO.Path.GetTempPath();            
+
+            const int BUFFER_SIZE = 10 * 1024;    
+        
+            int chunkSize = 90 * 1024 * 1024;
+
+            byte[] buffer = new byte[BUFFER_SIZE];
+
+            using (Stream input = File.OpenRead(local_path))
+            {
+                int index = 0;
+                while (input.Position < input.Length)
+                {
+                    string temp_filename = temp_path + "\\" + filename + "__" + index.ToString();
+                    chunks.Add(temp_filename);
+                    using (Stream output = File.Create( temp_filename ))
+                    {
+                        int remaining = chunkSize, bytesRead;
+                        while( remaining > 0 && ( bytesRead = input.Read(buffer, 0, Math.Min(remaining, BUFFER_SIZE))) > 0 )
+                        {
+                            output.Write(buffer, 0, bytesRead);
+                            remaining -= bytesRead;
+                        }
+                    }
+                    index++;
+                    Thread.Sleep(500); //?
+                }
+            }
+        }
     }
 
     public class bFileInfo
     {
         public string Date { get; set; }
         public string Etag { get; set; }        
+    }
+
+    public class bMultipartInfo
+    {
+        public string upload_id { get; set; }
     }
 
     #region deprecated

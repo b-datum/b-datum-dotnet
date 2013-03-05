@@ -32,6 +32,9 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="LibCurlNet">
+      <HintPath>..\..\..\..\Desktop\libcurl_dot_net\bin\LibCurlNet.dll</HintPath>
+    </Reference>
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\..\..\visual studio 2010\Projects\b_datum_backup_tool\packages\Newtonsoft.Json.4.5.11\lib\net20\Newtonsoft.Json.dll</HintPath>
     </Reference>
