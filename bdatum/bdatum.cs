@@ -99,6 +99,8 @@ namespace bdatum
                 bconfig.AppSettings.Settings["node_key"].Value = oconfig.node_key;
             }
 
+            
+
 
             bconfig.Save();
             //config.Save(ConfigurationSaveMode.Modified);
@@ -190,6 +192,69 @@ namespace bdatum
             }
         }
 
+        public static void SaveBlackList(List<string> blacklist)
+        {
+            Configuration roamingConfig =
+ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+
+            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
+            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
+
+            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
+
+            int index = 0;
+            foreach (string path in blacklist)
+            {
+                string directory = "blacklist" + index.ToString();
+
+                if (bconfig.AppSettings.Settings[directory] == null)
+                {
+                    bconfig.AppSettings.Settings.Add(directory, path);
+                }
+                else
+                {
+                    bconfig.AppSettings.Settings[directory].Value = path;
+                }
+                index++;
+            }
+
+
+            bconfig.Save();
+            //config.Save(ConfigurationSaveMode.Modified);
+
+            string sectionName = "appSettings";
+            ConfigurationManager.RefreshSection(sectionName);
+        }
+
+        public static List<string> LoadBlackList()
+        {
+            Configuration roamingConfig =
+ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+
+            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
+            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
+
+            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
+
+            List<string> blacklist = new List<string>();
+
+            
+            for(int index = 0; index < 6; index++)
+            {
+                string directory = "blacklist" + index.ToString();
+
+                if (bconfig.AppSettings.Settings[directory] != null)
+                {
+                    blacklist.Add( bconfig.AppSettings.Settings[directory].Value);
+                }
+                else
+                {
+                    blacklist.Add("");
+                }                
+            }
+            return blacklist;
+        }
+
         public static void _LoadFileSettings()
         {
 #if DEBUG
@@ -228,6 +293,14 @@ namespace bdatum
         {
             if (AfterFirstSync != null)
                 AfterFirstSync(this, e);
+        }
+
+        // I don´t know if it should be a eventhandler
+        public event EventHandler FileSyncError;
+        protected virtual void OnFileSyncError(EventArgs e)
+        {
+            if (FileSyncError != null)
+                FileSyncError(this, e);
         }
 
         // local path in absolute
@@ -432,7 +505,14 @@ namespace bdatum
                 {
                     toupload.status = "Uploading";
                     OnUpdated(EventArgs.Empty);
-                    toupload.upload();
+                    try
+                    {
+                        toupload.upload();
+                    }
+                    catch
+                    {
+                        OnFileSyncError(EventArgs.Empty);
+                    }
                     OnUpdated(EventArgs.Empty);
                 }
             }
@@ -657,6 +737,8 @@ namespace bdatum
         public string partner_key { get; set; }
         public string node_key { get; set; }
 
+        public List<string> blacklist { get; set; }
+
         public string auth_key()
         {
             //return "WktZcUx6SHJUb2F5WVVlY1NNUVM6SnZkaUJlOWJIZmRCNEpLRm5HOGQ=";
@@ -743,6 +825,7 @@ namespace bdatum
         public long local_size { get; set; }
 
         private List<string> chunks = new List<string>();
+        private int lastpart = 0;
 
         // bla bla bla defines what to do
         // Dispatch table is your friend
@@ -867,7 +950,15 @@ namespace bdatum
 
         public string upload()
         {
-            if (local_size > 90 * 1024 * 1024)
+            // I'm jack gigantic monolitic method
+            if (_blacklisted())
+            {
+                status = "ignore list";
+                return null;
+            }
+
+            //if (local_size > 90 * 1024 * 1024)
+            if (local_size > 7 * 1024 * 1024)
             {
                 splitfile();
 
@@ -881,22 +972,35 @@ namespace bdatum
                 string answer = curlinit.StandardOutput.ReadToEnd();
 
                 bMultipartInfo multipart = JsonConvert.DeserializeObject<bMultipartInfo>(answer);
+                bParts parts = new bParts();
 
                 string upload_id = multipart.upload_id;
 
                 curlinit.WaitForExit();
 
                 int part = 1;
+
                 foreach (string chunk in chunks)
                 {
+                    //resume
+                    if (part < lastpart)
+                    {
+                        part++;
+                        continue;
+                    }
+
                     string md5sum = _GetMd5HashFromFile(chunk);
+
+                    string[] detail = new string[] { part.ToString(), md5sum };
+
+                    parts.parts.Add( detail);
 
                     Process curl = new Process();
 
                     curl.StartInfo.UseShellExecute = false;
                     curl.StartInfo.FileName = "curl.exe";
                     curl.StartInfo.CreateNoWindow = true;
-                    curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + md5sum + "\" -T \"" + chunk + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "&part=" + part.ToString() + "&upload_id="  + upload_id + "\"";
+                    curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + md5sum + "\" -T \"" + chunk + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "&part=" + part.ToString() + "&upload_id=" + upload_id + "\"";
                     //curl.StartInfo.Arguments = " --version";
                     curl.StartInfo.RedirectStandardOutput = true;
                     bool started = curl.Start();
@@ -904,43 +1008,54 @@ namespace bdatum
                     string output = curl.StandardOutput.ReadToEnd();
                     curl.WaitForExit();
 
+                    //File.Delete(chunk);
                     if (String.IsNullOrEmpty(output))
                     {
-                        status = "uploaded";
-                        return output;
+                        status = "uploaded part " + part.ToString();
+                        lastpart = part;
+                        //return output;
                     }
                     else
                     {
-                        status = "Upload Failed" + output;
-                        return output;
+                        status = "Error: Upload part" + part.ToString() + " " + output;
+                        //return output;
                     }
-
                     part++;
                 }
+
+                string send = JsonConvert.SerializeObject(parts);
+
+                // Last part
+
+                Process curlend = new Process();
+                curlend.StartInfo.UseShellExecute = false;
+                curlend.StartInfo.FileName = "curl.exe";
+                curlend.StartInfo.CreateNoWindow = true;
+                curlend.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\"" + " -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Etag:" + ETag + "\" -X POST -d \"" + send + "\" --url\"" + b_http.url + "storage?path=" + path + "&upload_id=" + upload_id + "\"";
+                curlend.StartInfo.RedirectStandardOutput = true;
+                curlend.Start();
+
+                string last_answer = curlend.StandardOutput.ReadToEnd();
+
+                curlend.WaitForExit();
+
+
+                if (String.IsNullOrEmpty(last_answer))
+                {
+                    status = "uploaded";
+                    return last_answer;
+                }
+                else
+                {
+                    status = "Error: Closing the upload" + last_answer;
+                    return last_answer;
+                }                
             }
-
-            return _upload_external_curl();
-            //return this.UPLOADNEW();
-            try
-            {               
-                WebClient wc = new WebClient();
-                wc.Headers.Add("Authorization: Basic " + _node.auth_key());
-                wc.Headers.Add("ETag: " + this.ETag);
-
-                // Verify on server on how to upload files with a espace in the name
-                //string encoded_url = HttpUtility.UrlEncode(b_http.url + "storage?path=" + path);
-
-                var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", local_path);
-
-                status = "uploaded";
-
-                return status;
-            }
-            catch( Exception e )
+            else
             {
-                this.status = "Error when Uploading" + e.Message;                
-            }            
-            return status;
+                return _upload_external_curl();
+            }
+
         }
 
         public string curl_upload()
@@ -958,7 +1073,14 @@ namespace bdatum
 
         // Todo load local_path with a likely full path ( c:\..)
         public string download(string serverpath, string savepath)
-        {            
+        {
+
+            if (_blacklisted())
+            {
+                status = "ignore list";
+                return null;
+            }
+
             WebClient wc = new WebClient();
             wc.Headers.Add("Authorization: Basic " + _node.auth_key());
 
@@ -990,6 +1112,12 @@ namespace bdatum
 
         public string delete(string path)
         {
+            if (_blacklisted())
+            {
+                status = "ignore list";
+                return null;
+            }
+
             return b_http.DELETE("storage/" + path, _node.auth_key());
         }
 
@@ -1056,13 +1184,38 @@ namespace bdatum
             return returnString;
         }
 
-        public void splitfile()
+        public bool splitfile()
         {
-            string temp_path = System.IO.Path.GetTempPath();            
+            // I need to check is enough disk space to continue.
+
+            DriveInfo[] alldrives = DriveInfo.GetDrives();
+            
+            string temp_path = System.IO.Path.GetTempPath();
+
+            string drive_letter = temp_path.Substring(0, 3);
+
+            foreach (var drive in alldrives)
+            {
+                if (drive.Name == drive_letter)
+                {
+                    if (drive.TotalFreeSpace < local_size )
+                    {
+                        this.status = "Error: Not enough disk space";
+                        throw new System.OperationCanceledException("Not enoughs disk space");
+                    }
+                }
+            }
+
+            // Resume
+            if (lastpart > 0)
+            {
+                return true;
+            }
 
             const int BUFFER_SIZE = 10 * 1024;    
         
-            int chunkSize = 90 * 1024 * 1024;
+            //int chunkSize = 90 * 1024 * 1024;
+            int chunkSize = 7 * 1024 * 1024;
 
             byte[] buffer = new byte[BUFFER_SIZE];
 
@@ -1083,9 +1236,25 @@ namespace bdatum
                         }
                     }
                     index++;
-                    Thread.Sleep(500); //?
+                    Thread.Sleep(500); 
                 }
             }
+
+            return true;
+        }
+
+        private bool _blacklisted()
+        {
+            List<string> blacklist = node.blacklist;
+
+            string mypath = Path.GetDirectoryName(local_path);
+
+            foreach (string path in blacklist)
+            {
+                if (mypath == path)
+                    return true;
+            }
+            return false;
         }
     }
 
@@ -1097,8 +1266,14 @@ namespace bdatum
 
     public class bMultipartInfo
     {
-        public string upload_id { get; set; }
+        public string upload_id { get; set; }        
     }
+
+    public class bParts
+    {
+        public List<string[]> parts = new List<string[]>();
+    }
+    
 
     #region deprecated
 
