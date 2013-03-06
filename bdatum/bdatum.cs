@@ -18,7 +18,7 @@ using System.Collections.Specialized;
 using System.Threading;
 using System.Web;
 
-using SeasideResearch.LibCurlNet;
+//using SeasideResearch.LibCurlNet;
 
 using System.Diagnostics;
 
@@ -508,14 +508,14 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 {
                     toupload.status = "Uploading";
                     OnUpdated(EventArgs.Empty);
-                    try
-                    {
+                    //try
+                    //{
                         toupload.upload();
-                    }
-                    catch
-                    {
-                        OnFileSyncError(EventArgs.Empty);
-                    }
+                    //}
+                    //catch
+                    //{
+                       //OnFileSyncError(EventArgs.Empty);
+                    //}
                     OnUpdated(EventArgs.Empty);
                 }
             }
@@ -972,6 +972,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 splitfile();
 
+                bParts parts = new bParts();                
+
                 Process curlinit = new Process();
                 curlinit.StartInfo.UseShellExecute = false;
                 curlinit.StartInfo.FileName = "curl.exe";
@@ -979,11 +981,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 curlinit.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\"" + "\" -H \"Etag: " + ETag + "\" -X POST \"" + b_http.url + "storage?path=" + path + "&multipart=1";
                 curlinit.StartInfo.RedirectStandardOutput = true;
                 curlinit.Start();
-                string answer = curlinit.StandardOutput.ReadToEnd();                
+                string answer = curlinit.StandardOutput.ReadToEnd();
 
                 bMultipartInfo multipart = JsonConvert.DeserializeObject<bMultipartInfo>(answer);
-                bParts parts = new bParts();
+                    
 
+                // HERE
                 string upload_id = multipart.upload_id;
 
                 curlinit.WaitForExit();
@@ -994,7 +997,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
                 foreach (string chunk in chunks)
                 {
-                    ;
+                    
                     //resume
                     if (part < lastpart)
                     {
@@ -1052,7 +1055,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 }
                 */
                 // Last part
-
+                
                 
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(b_http.url + "storage?path=" + path + "&upload_id=" + upload_id );
                 request.Method = "POST";
@@ -1062,34 +1065,32 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 request.ContentType = "application/json";
                 request.Accept = "application/json";
 
-                byte[] byte_post_data = Encoding.UTF8.GetBytes(send);
-                
-                request.ContentLength = byte_post_data.Length;
+                using (var streamWriter = new StreamWriter(request.GetRequestStream()))
+                {
+                    streamWriter.Write(send);
+                }
 
-                Stream data_stream = request.GetRequestStream();
-                data_stream.Write(byte_post_data, 0, byte_post_data.Length);
-                data_stream.Close();
-                
-                WebResponse response = request.GetResponse();
-                var _status = (((HttpWebResponse)response).StatusDescription);
+                var response = (HttpWebResponse)request.GetResponse();
+                using (var streamReader = new StreamReader(response.GetResponseStream()))
+                {
+                    var responseText = streamReader.ReadToEnd();
+                    //Now you have your response.
+                    //or false depending on information in the response
+                    return null;
+                }
 
-                data_stream = response.GetResponseStream();
+                return null; 
 
-                StreamReader response_stream = new StreamReader(data_stream);
-                string responseFromServer = response_stream.ReadToEnd();
-
-
-                return null;
                 Process curlend = new Process();
                 curlend.StartInfo.UseShellExecute = false;
                 curlend.StartInfo.FileName = "curl.exe";
                 curlend.StartInfo.CreateNoWindow = true;
                 //curlend.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\"" + " -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Etag:" + ETag + "\" -X POST -d \"" + send + "\" --url \"" + b_http.url + "storage?path=" + path + "&upload_id=" + upload_id + "\"";
                 //curlend.StartInfo.Arguments = string.Format(@" -d ""parts={2}"" -k -v  -H ""Authorization: Basic {0}"" -H ""Content-Type: application/json"" -H ""Accept: application/json"" -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, "http://192.168.2.25:3025?path=/&input=432423423"); // b_http.url + "storage?path=" + path + "&upload_id=" + upload_id);
-                curlend.StartInfo.Arguments = string.Format(@"-k -v -d ""foo"" -H ""Authorization: Basic {0}"" -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, b_http.url + "storage?path=" + path + "&upload_id=" + upload_id + "&parts=foo");
+                curlend.StartInfo.Arguments = string.Format(@"-k --trace-ascii tracy -d @send.txt -H ""Authorization: Basic {0}""  -H ""Content-Type: application/json"" -H ""Accept: application/json""  -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, b_http.url + "storage?path=" + path + "&upload_id=" + upload_id);
                 curlend.StartInfo.RedirectStandardOutput = true;
                 curlend.StartInfo.RedirectStandardError = true;
-                //curlend.StartInfo.RedirectStandardInput = true;
+                curlend.StartInfo.RedirectStandardInput = true;
                 curlend.Start();
 
                 string last_answer = curlend.StandardOutput.ReadToEnd();
@@ -1112,19 +1113,21 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
             else
             {
-                return _upload_external_curl();
+                return null;
+                //return _upload_external_curl();
             }
 
         }
 
         public string curl_upload()
         {
+            /*
             Easy easy = new Easy();
 
             easy.SetOpt(CURLoption.CURLOPT_HEADER, true);
             // Slist? 
             easy.SetOpt(CURLoption.CURLOPT_HTTPHEADER, null);
-
+            */
 
             return null;
 
