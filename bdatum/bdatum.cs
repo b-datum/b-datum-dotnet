@@ -508,14 +508,14 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 {
                     toupload.status = "Uploading";
                     OnUpdated(EventArgs.Empty);
-                    //try
-                    //{
+                    try
+                    {
                         toupload.upload();
-                    //}
-                    //catch
-                    //{
-                       //OnFileSyncError(EventArgs.Empty);
-                    //}
+                    }
+                    catch
+                    {
+                       OnFileSyncError(EventArgs.Empty);
+                    }
                     OnUpdated(EventArgs.Empty);
                 }
             }
@@ -1076,45 +1076,15 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                     var responseText = streamReader.ReadToEnd();
                     //Now you have your response.
                     //or false depending on information in the response
+
+
+                    status = "almost ended" + response.Headers.ToString();
                     return null;
-                }
-
-                return null; 
-
-                Process curlend = new Process();
-                curlend.StartInfo.UseShellExecute = false;
-                curlend.StartInfo.FileName = "curl.exe";
-                curlend.StartInfo.CreateNoWindow = true;
-                //curlend.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\"" + " -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Etag:" + ETag + "\" -X POST -d \"" + send + "\" --url \"" + b_http.url + "storage?path=" + path + "&upload_id=" + upload_id + "\"";
-                //curlend.StartInfo.Arguments = string.Format(@" -d ""parts={2}"" -k -v  -H ""Authorization: Basic {0}"" -H ""Content-Type: application/json"" -H ""Accept: application/json"" -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, "http://192.168.2.25:3025?path=/&input=432423423"); // b_http.url + "storage?path=" + path + "&upload_id=" + upload_id);
-                curlend.StartInfo.Arguments = string.Format(@"-k --trace-ascii tracy -d @send.txt -H ""Authorization: Basic {0}""  -H ""Content-Type: application/json"" -H ""Accept: application/json""  -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, b_http.url + "storage?path=" + path + "&upload_id=" + upload_id);
-                curlend.StartInfo.RedirectStandardOutput = true;
-                curlend.StartInfo.RedirectStandardError = true;
-                curlend.StartInfo.RedirectStandardInput = true;
-                curlend.Start();
-
-                string last_answer = curlend.StandardOutput.ReadToEnd();
-                string last_error = curlend.StandardError.ReadToEnd();
-                
-                curlend.WaitForExit();                
-
-                curlcommands.Add(curlend.StartInfo.Arguments);
-
-                if (String.IsNullOrEmpty(last_answer))
-                {
-                    status = "uploaded  " + curlend.StartInfo.Arguments + "  " + last_answer; // +last_error;
-                    return last_answer;
-                }
-                else
-                {
-                    status = "Error: Closing the upload" + last_answer;
-                    return last_answer;
-                }                
+                }              
             }
             else
             {
-                return null;
-                //return _upload_external_curl();
+                return _upload_external_curl();
             }
 
         }
@@ -1402,3 +1372,35 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
     #endregion
 }
+
+/*
+                Process curlend = new Process();
+                caurlend.StartInfo.UseShellExecute = false;
+                curlend.StartInfo.FileName = "curl.exe";
+                curlend.StartInfo.CreateNoWindow = true;
+                //curlend.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\"" + " -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Etag:" + ETag + "\" -X POST -d \"" + send + "\" --url \"" + b_http.url + "storage?path=" + path + "&upload_id=" + upload_id + "\"";
+                //curlend.StartInfo.Arguments = string.Format(@" -d ""parts={2}"" -k -v  -H ""Authorization: Basic {0}"" -H ""Content-Type: application/json"" -H ""Accept: application/json"" -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, "http://192.168.2.25:3025?path=/&input=432423423"); // b_http.url + "storage?path=" + path + "&upload_id=" + upload_id);
+                curlend.StartInfo.Arguments = string.Format(@"-k --trace-ascii tracy -d @send.txt -H ""Authorization: Basic {0}""  -H ""Content-Type: application/json"" -H ""Accept: application/json""  -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, b_http.url + "storage?path=" + path + "&upload_id=" + upload_id);
+                curlend.StartInfo.RedirectStandardOutput = true;
+                curlend.StartInfo.RedirectStandardError = true;
+                curlend.StartInfo.RedirectStandardInput = true;
+                curlend.Start();
+
+                string last_answer = curlend.StandardOutput.ReadToEnd();
+                string last_error = curlend.StandardError.ReadToEnd();
+                
+                curlend.WaitForExit();                
+
+                curlcommands.Add(curlend.StartInfo.Arguments);
+
+                if (String.IsNullOrEmpty(last_answer))
+                {
+                    status = "uploaded  " + curlend.StartInfo.Arguments + "  " + last_answer; // +last_error;
+                    return last_answer;
+                }
+                else
+                {
+                    status = "Error: Closing the upload" + last_answer;
+                    return last_answer;
+                }                
+*/
