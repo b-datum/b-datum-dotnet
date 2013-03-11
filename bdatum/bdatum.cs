@@ -30,7 +30,12 @@ using System.CodeDom.Compiler;
 
 namespace bdatum
 {
-    class bWebClient : WebClient
+    public class bFileAgentNewFile : EventArgs
+    {
+        public bFile newfile { get; set; }
+    }
+
+        class bWebClient : WebClient
     {
         protected override WebRequest GetWebRequest(Uri address)
         {
@@ -283,6 +288,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         public string path { get; set; }
         public bNode node { get; set; }
         private bool _IsRunning { get; set; }
+
+        private bool _firstsync = false;
         
         public event EventHandler Updated;
         protected virtual void OnUpdated(EventArgs e)
@@ -296,6 +303,21 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         {
             if (AfterFirstSync != null)
                 AfterFirstSync(this, e);
+        }
+
+        public event EventHandler AfterUpdateFileList;
+        protected virtual void OnAfterUpdateFileList(EventArgs e)
+        {
+            if (AfterUpdateFileList != null)
+                AfterUpdateFileList(this, e);
+        }
+
+        public delegate void AddedFileToListHandler(object sender, bFileAgentNewFile e);   
+        public event AddedFileToListHandler AddedFileToList;
+        protected virtual void OnAddedFileToList(bFileAgentNewFile e)
+        {
+            if (AddedFileToList != null)
+                AddedFileToList(this, e);
         }
 
         // I don´t know if it should be a eventhandler
@@ -430,14 +452,39 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         public void readlocaldir()
         {
-            string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
+            //string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
+            /*
+            string[] files = Directory.GetFiles(this.path, "*.*");
 
             foreach (string file in files)
             {
                 this.addfile(file);
             }
+            */
+
+            _readlocaldir(this.path);
 
             OnUpdated(EventArgs.Empty);
+            if ( ! _firstsync)
+            {
+                OnAfterUpdateFileList(EventArgs.Empty);
+            }
+        }
+
+        public void _readlocaldir(string walkpath)
+        {
+            string[] files = Directory.GetFiles(walkpath, "*.*");
+            foreach (string file in files)
+            {
+                this.addfile(file);
+            }
+            // do something to start download
+            string [] directories = Directory.GetDirectories(walkpath);
+            foreach (string directory in directories)
+            {
+                _readlocaldir(directory);
+            }
+
         }
 
         public void addfile(string path)
@@ -459,6 +506,10 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         public void syncFileList()
         {
             syncFileList("/");
+            if (!_firstsync)
+            {
+                OnAfterUpdateFileList(EventArgs.Empty);
+            }
         }
 
         public void syncFileList(string path)
@@ -501,7 +552,11 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         // Pseudo bug, always do it on c:\ ( should think about later )
         // Upload all files that are local on first attempt
         public void first_sync()
-        {       
+        {
+
+            _readlocaldir_with_upload(this.path);
+            
+            /*
             foreach (bFile toupload in filelist.Values)
             {
                 if (! String.IsNullOrEmpty(toupload.local_path))
@@ -521,6 +576,28 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
             OnUpdated(EventArgs.Empty);
             OnAfterFirstSync(EventArgs.Empty);
+             */
+        }
+
+        public void _readlocaldir_with_upload(string walkpath)
+        {
+            string[] files = Directory.GetFiles(walkpath, "*.*");
+            foreach (string file in files)
+            {
+                //this.addfile(file);
+                bFile newfile = new bFile(file, node);
+                filelist.Add(newfile.path, newfile);
+                //newfile.upload();
+                bFileAgentNewFile e = new bFileAgentNewFile();
+                e.newfile = newfile;
+                OnAddedFileToList( e );
+            }
+            // do something to start download
+            string[] directories = Directory.GetDirectories(walkpath);
+            foreach (string directory in directories)
+            {
+                _readlocaldir_with_upload(directory);
+            }
         }
 
         public bFile file(string name)
@@ -825,15 +902,18 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
     public class bFile
     {
+
+        //private string _Etag;
+
+        private List<string> chunks = new List<string>();
+        private int lastpart = 0;
+
         public string local_path { get; set; }        
         public string ETag { get; set; }
         public string filename { get; set; }
         public string type { get; set; }
 
-        public long local_size { get; set; }
-
-        private List<string> chunks = new List<string>();
-        private int lastpart = 0;
+        public long local_size { get; set; }        
 
         public List<string> curlcommands = new List<string>();
 
@@ -893,9 +973,14 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             FileInfo fileinfo = new FileInfo(local_path);
             local_size = fileinfo.Length;
 
-            ETag = _GetMd5HashFromFile(value);
+            //ETag = _GetMd5HashFromFile(value);
 
             status = "local";
+        }
+
+        public void genETag()
+        {
+            ETag = _GetMd5HashFromFile(local_path);
         }
 
         public bool IsDirectory()
@@ -960,6 +1045,11 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         public string upload()
         {
+            if (ETag == null)
+            {
+                genETag();
+            }
+
             // I'm jack gigantic monolitic method
             if (_blacklisted())
             {
@@ -1079,7 +1169,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
 
                     status = "almost ended" + response.Headers.ToString();
-                    return null;
+                    return responseText;
                 }              
             }
             else
