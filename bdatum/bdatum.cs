@@ -56,6 +56,7 @@ namespace bdatum
     {
         public static void SaveSettings(bOrganization oconfig)
         {
+            // maybe it should be PerUserRoamingAndLocal ( in case of domains )
             Configuration roamingConfig =
                 ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
 
@@ -290,7 +291,30 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         private bool _IsRunning { get; set; }
 
         private bool _firstsync = false;
-        
+
+        public bool dummy_upload = false;
+        public bool dummy_etag = false;
+
+        // local path in absolute
+        private Dictionary<string, bFile> filelist = new Dictionary<string, bFile>();
+
+        private FileSystemWatcher watcher = new FileSystemWatcher();
+        private Queue<bFile> syncronize = new Queue<bFile>();
+        private bool syncronize_writing = false;
+
+        // File Cache Info
+        private string appPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        private string FileCacheInfo;
+        private Dictionary<string, string> FileCache = new Dictionary<string, string>();
+
+        public bFileAgent()
+        {
+            FileCacheInfo = appPath + @"\FileCacheInfo.dat";
+            ReadFileCacheInfo();
+        }
+
+        #region Events
+
         public event EventHandler Updated;
         protected virtual void OnUpdated(EventArgs e)
         {
@@ -328,12 +352,45 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 FileSyncError(this, e);
         }
 
-        // local path in absolute
-        private Dictionary<string, bFile> filelist = new Dictionary<string,bFile>();
+        #endregion
 
-        private FileSystemWatcher watcher = new FileSystemWatcher();
-        private Queue<bFile> syncronize = new Queue<bFile>();
-        private bool syncronize_writing = false;
+        #region FileCacheInfo
+
+        private void ReadFileCacheInfo()
+        {
+            if (File.Exists(FileCacheInfo))
+            {
+                using ( StreamReader reader = new StreamReader( FileCacheInfo) )
+                {
+                    while (!reader.EndOfStream)
+                    {
+                        string [] cacheinfo = reader.ReadLine().Split('\t');
+                        if (!String.IsNullOrEmpty(cacheinfo[0]))
+                        {
+                            FileCache.Add( cacheinfo[1], cacheinfo[0] );
+                        }                        
+                    } 
+                }
+            }
+        }
+
+        //Destroy or at the end of first sync
+        private void WriteFileCacheInfo()
+        {
+            using (StreamWriter writer = new StreamWriter(FileCacheInfo))
+            {
+                foreach ( bFile file in filelist.Values )
+                {
+                    if (!String.IsNullOrEmpty(file.ETag) && !String.IsNullOrEmpty(file.local_path))
+                    {
+                        writer.WriteLine(file.ETag + '\t' + file.local_path);
+                    }
+                }
+            }
+         
+        }
+
+        #endregion        
 
         public void AddToQueue(bFile file)
         {
@@ -487,12 +544,6 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         }
 
-        public void addfile(string path)
-        {
-            bFile newfile = new bFile(path, node);            
-            filelist.Add(newfile.path, newfile);
-        }
-
         public List<bFile> files()
         {
             List<bFile> files = new List<bFile>();
@@ -584,10 +635,18 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             string[] files = Directory.GetFiles(walkpath, "*.*");
             foreach (string file in files)
             {
-                //this.addfile(file);
-                bFile newfile = new bFile(file, node);
-                filelist.Add(newfile.path, newfile);
+
+                bFile newfile = this.addfile(file);
+                // Date bigger than last full backup
+                if (FileCache.ContainsKey(file) && newfile.)
+                {
+
+                }
+                
+                
                 //newfile.upload();
+
+                // update file list
                 bFileAgentNewFile e = new bFileAgentNewFile();
                 e.newfile = newfile;
                 OnAddedFileToList( e );
@@ -598,6 +657,14 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 _readlocaldir_with_upload(directory);
             }
+        }
+
+        public bFile addfile(string path)
+        {
+            bFile newfile = new bFile(path, node);
+            filelist.Add(newfile.path, newfile);
+
+            return newfile;
         }
 
         public bFile file(string name)
