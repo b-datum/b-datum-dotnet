@@ -35,7 +35,7 @@ namespace bdatum
         public bFile newfile { get; set; }
     }
 
-        class bWebClient : WebClient
+    class bWebClient : WebClient
     {
         protected override WebRequest GetWebRequest(Uri address)
         {
@@ -108,7 +108,14 @@ namespace bdatum
                 bconfig.AppSettings.Settings["node_key"].Value = oconfig.node_key;
             }
 
-            
+            if (bconfig.AppSettings.Settings["last_successful_backup"] == null)
+            {
+                bconfig.AppSettings.Settings.Add("last_successful_backup", oconfig.last_successful_backup.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                bconfig.AppSettings.Settings["last_successful_backup"].Value = oconfig.last_successful_backup.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
 
 
             bconfig.Save();
@@ -152,7 +159,10 @@ namespace bdatum
             {
                 oconfig.node_key = bconfig.AppSettings.Settings["node_key"].Value;
             }
-
+            if (bconfig.AppSettings.Settings["last_successful_backup"] != null)
+            {
+                oconfig.last_successful_backup = DateTime.Parse(bconfig.AppSettings.Settings["last_successful_backup"].Value, System.Globalization.CultureInfo.InvariantCulture); 
+            }
         }
 
         public static void SavePath(string path)
@@ -306,6 +316,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         private string appPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         private string FileCacheInfo;
         private Dictionary<string, string> FileCache = new Dictionary<string, string>();
+        public DateTime reference { get; set; }
 
         public bFileAgent()
         {
@@ -375,7 +386,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         }
 
         //Destroy or at the end of first sync
-        private void WriteFileCacheInfo()
+        private void _WriteFileCacheInfo()
         {
             using (StreamWriter writer = new StreamWriter(FileCacheInfo))
             {
@@ -388,6 +399,58 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 }
             }
          
+        }
+
+        public void FreshFileCacheInfo(DateTime Reference)
+        {
+            if (reference == null)
+            {
+                reference = Reference;
+            }
+            foreach( bFile file in filelist.Values )
+            {
+                _UpdateCachedFileETag(file);
+            }
+
+            OnUpdated(EventArgs.Empty);
+
+            _WriteFileCacheInfo();
+        }
+
+        private void _UpdateCachedFileETag(bFile file)
+        {
+            if (!String.IsNullOrEmpty(file.local_path))
+            {
+
+                if (file.last_modified.CompareTo(reference) == 1)
+                {
+                    file.genETag();
+                    if (FileCache.ContainsKey(file.local_path))
+                    {
+                        FileCache[file.local_path] = file.ETag;
+                    }
+                    else
+                    {
+                        FileCache.Add(file.local_path, file.ETag);
+                    }
+
+                }
+                else
+                {
+                    if (String.IsNullOrEmpty(file.ETag))
+                    {
+                        if (FileCache.ContainsKey(file.local_path))
+                        {
+                            file.ETag = FileCache[file.local_path];
+                        }
+                        else
+                        {
+                            file.genETag();
+                            FileCache.Add(file.local_path, file.ETag);
+                        }
+                    }
+                }
+            }
         }
 
         #endregion        
@@ -509,16 +572,6 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         public void readlocaldir()
         {
-            //string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
-            /*
-            string[] files = Directory.GetFiles(this.path, "*.*");
-
-            foreach (string file in files)
-            {
-                this.addfile(file);
-            }
-            */
-
             _readlocaldir(this.path);
 
             OnUpdated(EventArgs.Empty);
@@ -530,16 +583,32 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         public void _readlocaldir(string walkpath)
         {
-            string[] files = Directory.GetFiles(walkpath, "*.*");
-            foreach (string file in files)
+            try
             {
-                this.addfile(file);
+                string[] files = Directory.GetFiles(walkpath, "*.*");
+
+                foreach (string file in files)
+                {
+                    this.addfile(file);
+                }
             }
-            // do something to start download
-            string [] directories = Directory.GetDirectories(walkpath);
-            foreach (string directory in directories)
+            catch( Exception e )
             {
-                _readlocaldir(directory);
+                var stop = e; 
+            };
+
+            try
+            {
+                // do something to start download
+                string[] directories = Directory.GetDirectories(walkpath);
+                foreach (string directory in directories)
+                {
+                    _readlocaldir(directory);
+                }
+            }
+            catch (Exception e)
+            {
+                var stop = e;
             }
 
         }
@@ -605,46 +674,24 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         public void first_sync()
         {
 
-            _readlocaldir_with_upload(this.path);
+            _readlocaldir_with_upload(this.path, reference);
+            var fefw = "stap";
             
-            /*
-            foreach (bFile toupload in filelist.Values)
-            {
-                if (! String.IsNullOrEmpty(toupload.local_path))
-                {
-                    toupload.status = "Uploading";
-                    OnUpdated(EventArgs.Empty);
-                    try
-                    {
-                        toupload.upload();
-                    }
-                    catch
-                    {
-                       OnFileSyncError(EventArgs.Empty);
-                    }
-                    OnUpdated(EventArgs.Empty);
-                }
-            }
-            OnUpdated(EventArgs.Empty);
+//            OnUpdated(EventArgs.Empty);
             OnAfterFirstSync(EventArgs.Empty);
-             */
-        }
 
-        public void _readlocaldir_with_upload(string walkpath)
+        }
+        
+        public void _readlocaldir_with_upload(string walkpath, DateTime reference)
         {
             string[] files = Directory.GetFiles(walkpath, "*.*");
             foreach (string file in files)
             {
 
                 bFile newfile = this.addfile(file);
-                // Date bigger than last full backup
-                if (FileCache.ContainsKey(file) && newfile.)
-                {
-
-                }
+                _UpdateCachedFileETag(newfile);
                 
-                
-                //newfile.upload();
+                newfile.upload();
 
                 // update file list
                 bFileAgentNewFile e = new bFileAgentNewFile();
@@ -655,16 +702,24 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             string[] directories = Directory.GetDirectories(walkpath);
             foreach (string directory in directories)
             {
-                _readlocaldir_with_upload(directory);
+                _readlocaldir_with_upload(directory,reference);
             }
         }
 
         public bFile addfile(string path)
         {
             bFile newfile = new bFile(path, node);
-            filelist.Add(newfile.path, newfile);
+            if (!filelist.ContainsKey(newfile.path))
+            {
+                filelist.Add(newfile.path, newfile);
+                return newfile;
+            }
+            else
+            {
+                return filelist[newfile.path];
+            }
 
-            return newfile;
+            
         }
 
         public bFile file(string name)
@@ -839,6 +894,14 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         public string organization_id { get; set; }
         public string user_name { get; set; }
 
+        // This variables shouldn't be here, in true is 
+        // time to bdatumConfigManager have a object config 
+        // or not.. :P
+
+        public DateTime last_successful_backup { get; set; }
+        // Should exist a cache timestamp
+        // public DateTime 
+
         // Here for configuration
         public string node_key { get; set; }
 
@@ -995,7 +1058,9 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         public string version { get; set; }
         public string mimetype_id { get; set; }
         public string mime { get; set; }
-        public string path { get; set;} 
+        public string path { get; set;}
+
+        public DateTime last_modified { get; set; }
 
         /* Status: 
          * processing ( first appears, local or remote )
@@ -1039,6 +1104,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
             FileInfo fileinfo = new FileInfo(local_path);
             local_size = fileinfo.Length;
+
+            last_modified = System.IO.File.GetLastWriteTime(local_path);
 
             //ETag = _GetMd5HashFromFile(value);
 
@@ -1285,17 +1352,23 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 fullpath = local_path;
             }
-
-            using (var md5 = new MD5CryptoServiceProvider())
+            try
             {
-                var buffer = md5.ComputeHash(File.ReadAllBytes(fullpath));
-                var sb = new StringBuilder();
-                for (int i = 0; i < buffer.Length; i++)
+                using (var md5 = new MD5CryptoServiceProvider())
                 {
-                    sb.Append(buffer[i].ToString("x2"));
-                }
+                    var buffer = md5.ComputeHash(File.ReadAllBytes(fullpath));
+                    var sb = new StringBuilder();
+                    for (int i = 0; i < buffer.Length; i++)
+                    {
+                        sb.Append(buffer[i].ToString("x2"));
+                    }
 
-                return sb.ToString();
+                    return sb.ToString();
+                }
+            }
+            catch (Exception e)
+            {
+                return null;
             }
         }
 
