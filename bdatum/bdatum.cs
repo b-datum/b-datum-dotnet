@@ -425,6 +425,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 if (file.last_modified.CompareTo(reference) == 1)
                 {
                     file.genETag();
+                    file.status = "ETag cache";
                     if (FileCache.ContainsKey(file.local_path))
                     {
                         FileCache[file.local_path] = file.ETag;
@@ -446,6 +447,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                         else
                         {
                             file.genETag();
+                            file.status = "ETag cache";
                             FileCache.Add(file.local_path, file.ETag);
                         }
                     }
@@ -1191,6 +1193,35 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 return null;
             }
 
+            // Check if file exists   POST /storage?path=/foo/bar.zip&check=1, Headers => [ Etag => 'abc123abcdef..']
+            HttpWebRequest check_request = (HttpWebRequest)WebRequest.Create(b_http.url + "storage?path=" + path + "&check=1");
+            check_request.Method = "POST";
+
+            check_request.Headers.Add("Authorization: Basic " + _node.auth_key());
+            check_request.Headers.Add("Etag: " + ETag);
+            check_request.ContentType = "application/json";
+            check_request.Accept = "application/json";
+            try
+            {
+                var check_response = (HttpWebResponse)check_request.GetResponse();
+                using (var streamReader = new StreamReader(check_response.GetResponseStream()))
+                {
+                    var responseText = streamReader.ReadToEnd();
+                    //Now you have your response.
+                    //or false depending on information in the response
+                    if (check_response.StatusCode == HttpStatusCode.Created)
+                    {
+                        status = "uploaded*";
+                        return responseText;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                var stop = "it seems that the file doesn't exist";
+            }
+
+            
             //if (local_size > 90 * 1024 * 1024)
             if (local_size > 7 * 1024 * 1024)
             {
