@@ -673,18 +673,17 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         // Pseudo bug, always do it on c:\ ( should think about later )
         // Upload all files that are local on first attempt
-        public void first_sync()
+        public void full_backup()
         {
 
-            _readlocaldir_with_upload(this.path, reference);
-            var fefw = "stap";
+            _readlocaldir_with_upload(this.path, reference, false);            
             
 //            OnUpdated(EventArgs.Empty);
             OnAfterFirstSync(EventArgs.Empty);
 
         }
         
-        public void _readlocaldir_with_upload(string walkpath, DateTime reference)
+        public void _readlocaldir_with_upload(string walkpath, DateTime reference, bool checkdate)
         {
             string[] files = Directory.GetFiles(walkpath, "*.*");
             foreach (string file in files)
@@ -693,7 +692,20 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 bFile newfile = this.addfile(file);
                 _UpdateCachedFileETag(newfile);
                 
-                newfile.upload();
+                //  if file is newer...
+                if (reference != null && checkdate)
+                {
+                    if (newfile.last_modified.CompareTo(reference) > 0)
+                    {  // int relative = file.last_modified.CompareTo(organization.last_successful_backup);
+                        newfile.upload();
+                    }else{
+                        newfile.status = "not updated since last backup";
+                    }
+                }
+                else
+                {
+                    newfile.upload();
+                }
 
                 // update file list
                 bFileAgentNewFile e = new bFileAgentNewFile();
@@ -704,7 +716,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             string[] directories = Directory.GetDirectories(walkpath);
             foreach (string directory in directories)
             {
-                _readlocaldir_with_upload(directory,reference);
+                _readlocaldir_with_upload(directory,reference, checkdate);
             }
         }
 
