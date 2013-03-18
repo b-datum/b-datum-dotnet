@@ -682,6 +682,11 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             OnAfterFirstSync(EventArgs.Empty);
 
         }
+
+        public void incremental_backup()
+        {
+            _readlocaldir_with_upload(this.path, reference, true);            
+        }
         
         public void _readlocaldir_with_upload(string walkpath, DateTime reference, bool checkdate)
         {
@@ -1076,17 +1081,10 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         public DateTime last_modified { get; set; }
 
-        /* Status: 
-         * processing ( first appears, local or remote )
-         * local ( it is local , not in sync )
-         * uploading ( it is uploading )
-         * deleting ( say it )
-         * done ( it is in sync )
-         * 
-         * remote ( only remote )
-         * downloading ( only remote, downloading it valid for first sync )
-
-         */
+        enum Status
+        {
+            initial, local, remote
+        };
 
         public string status { get; set; }
 
@@ -1173,24 +1171,6 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 }
         }
 
-        public string _upload()
-        {
-            bWebClient wc = new bWebClient();
-            wc.Headers.Add("Authorization: Basic " + _node.auth_key());
-            // Node working
-            //wc.Headers.Add("Authorization: Basic WktZcUx6SHJUb2F5WVVlY1NNUVM6SnZkaUJlOWJIZmRCNEpLRm5HOGQ=");
-            wc.Headers.Add("ETag: " + this.ETag);
-
-            // Verify on server on how to upload files with a espace in the name
-            //string encoded_url = HttpUtility.UrlEncode(b_http.url + "storage?path=" + path);
-
-            var result = wc.UploadFile(b_http.url + "storage?path=" + path, "PUT", local_path);
-
-            status = "uploaded";
-
-            return status;
-        }
-
         public string upload()
         {
             if (ETag == null)
@@ -1205,14 +1185,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 return null;
             }
 
-            // Check if file exists   POST /storage?path=/foo/bar.zip&check=1, Headers => [ Etag => 'abc123abcdef..']
-            HttpWebRequest check_request = (HttpWebRequest)WebRequest.Create(b_http.url + "storage?path=" + path + "&check=1");
-            check_request.Method = "POST";
+            HttpWebRequest check_request = verifyIfExists();
 
-            check_request.Headers.Add("Authorization: Basic " + _node.auth_key());
-            check_request.Headers.Add("Etag: " + ETag);
-            check_request.ContentType = "application/json";
-            check_request.Accept = "application/json";
             try
             {
                 var check_response = (HttpWebResponse)check_request.GetResponse();
@@ -1356,19 +1330,18 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         }
 
-        public string curl_upload()
+        private HttpWebRequest verifyIfExists()
         {
-            /*
-            Easy easy = new Easy();
+            // Check if file exists   POST /storage?path=/foo/bar.zip&check=1, Headers => [ Etag => 'abc123abcdef..']
+            HttpWebRequest check_request = (HttpWebRequest)WebRequest.Create(b_http.url + "storage?path=" + path + "&check=1");
+            check_request.Method = "POST";
 
-            easy.SetOpt(CURLoption.CURLOPT_HEADER, true);
-            // Slist? 
-            easy.SetOpt(CURLoption.CURLOPT_HTTPHEADER, null);
-            */
-
-            return null;
-
-        }
+            check_request.Headers.Add("Authorization: Basic " + _node.auth_key());
+            check_request.Headers.Add("Etag: " + ETag);
+            check_request.ContentType = "application/json";
+            check_request.Accept = "application/json";
+            return check_request;
+        }        
 
         // Todo load local_path with a likely full path ( c:\..)
         public string download(string serverpath, string savepath)
