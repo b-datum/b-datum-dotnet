@@ -28,8 +28,13 @@ using System.CodeDom.Compiler;
 //It seems to need a higher dot net version
 //using RestSharp;
 
+using System.Runtime.InteropServices;
+
 namespace bdatum
 {
+
+
+
     public class bFileAgentNewFile : EventArgs
     {
         public bFile newfile { get; set; }
@@ -324,6 +329,11 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             ReadFileCacheInfo();
         }
 
+        ~bFileAgent()
+        {
+            _WriteFileCacheInfo();
+        }
+
         #region Events
 
         public event EventHandler Updated;
@@ -385,6 +395,18 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
         }
 
+        private void FileCacheLoadFileList()
+        {
+            foreach (string filename in FileCache.Keys)
+            {
+                if (!filelist.ContainsKey(filename))
+                {
+                    bFile cached = this.addfile(filename);
+                    cached.ETag = FileCache[filename];
+                }
+            }
+        }
+
         //Destroy or at the end of first sync
         private void _WriteFileCacheInfo()
         {
@@ -392,7 +414,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 foreach ( bFile file in filelist.Values )
                 {
-                    if (!String.IsNullOrEmpty(file.ETag) && !String.IsNullOrEmpty(file.local_path))
+                    //if (!String.IsNullOrEmpty(file.ETag) && !String.IsNullOrEmpty(file.local_path))
+                    if (!String.IsNullOrEmpty(file.local_path))
                     {
                         writer.WriteLine(file.ETag + '\t' + file.local_path);
                     }
@@ -434,7 +457,6 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                     {
                         FileCache.Add(file.local_path, file.ETag);
                     }
-
                 }
                 else
                 {
@@ -568,7 +590,6 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         private  void OnRenamed(object source, RenamedEventArgs e)
         {
-            // Now my name is different
             OnUpdated(EventArgs.Empty);            
         }
 
@@ -628,7 +649,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 }            
         }
 
-        public void readlocaldir()
+        public void SlowReadlocalDir()
         {
             _readlocaldir(this.path);
 
@@ -642,11 +663,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         // Will fail all operation if something goes wrong
         public void FastReadlocalDir()
         {
-            string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
+            var files = DirectoryExtensions.EnumerateFiles(this.path, "*.*");
+            //string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
 
             foreach (string file in files)
             {
-                this.addfile(file);
+                this._FastAddFile(file);
             }
         }
     
@@ -688,14 +710,10 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         {
             if (this.filelist.Count == 0)
             {
-                readlocaldir();
-            }
-            foreach (bFile file in filelist.Values)
-            {
-                _UpdateCachedFileETag(file);
-                file.upload();
-                OnUpdated(EventArgs.Empty);
+                _readlocaldir_with_upload(this.path, reference, false);
             }            
+            _backup(false);
+
             OnAfterBackup(EventArgs.Empty);
         }
 
@@ -703,52 +721,50 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         {
             if (this.filelist.Count == 0)
             {
-                readlocaldir();
+                _readlocaldir_with_upload(this.path, reference, true);
             }
-            
-            foreach (bFile file in filelist.Values)
-            {
-                _UpdateCachedFileETag(file);
-                if (reference != null)
-                {
-                    if ( file.last_modified.CompareTo(reference) > 0)
-                    {  
-                        file.upload();
-                    }
-                    else
-                    {
-                        file.status = "not updated since last backup";
-                    }
-                }
-                OnUpdated(EventArgs.Empty);
-            }            
+            _backup();
             OnAfterBackup(EventArgs.Empty);
         }
+
+        private void _backup( bool checkdate = true)
+        {
+            foreach (bFile file in filelist.Values)
+            {
+                _filebackup(checkdate, file);                
+            }
+            OnUpdated(EventArgs.Empty);
+        }
+
+        private void _filebackup(bool checkdate, bFile file)
+        {
+            _UpdateCachedFileETag(file);
+            if (reference != null && checkdate)
+            {
+                if (file.last_modified.CompareTo(reference) > 0)
+                {
+                    file.upload();
+                }
+                else
+                {
+                    file.status = "not updated since last backup";
+                }
+            }
+            else
+            {
+                file.upload();
+            }            
+        }
         
-        // Deprecated
         public void _readlocaldir_with_upload(string walkpath, DateTime reference, bool checkdate)
         {
             string[] files = Directory.GetFiles(walkpath, "*.*");
             foreach (string file in files)
             {
-
                 bFile newfile = this.addfile(file);
                 _UpdateCachedFileETag(newfile);
-                
-                //  if file is newer...
-                if (reference != null && checkdate)
-                {
-                    if (newfile.last_modified.CompareTo(reference) > 0)
-                    {  // int relative = file.last_modified.CompareTo(organization.last_successful_backup);
-                        newfile.upload();
-                    }else{
-                        newfile.status = "not updated since last backup";
-                    }
-                }
-                else
-                {
-                    newfile.upload();
-                }
+
+                _filebackup(checkdate, newfile);                
 
                 // update file list
                 bFileAgentNewFile e = new bFileAgentNewFile();
@@ -761,6 +777,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 _readlocaldir_with_upload(directory,reference, checkdate);
             }
+        }
+
+        public void _FastAddFile(string path)
+        {
+            bFile newfile = new bFile(path, node);
+            filelist.Add(newfile.path, newfile);
         }
 
         public bFile addfile(string path)
@@ -1153,7 +1175,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             FileInfo fileinfo = new FileInfo(local_path);
             local_size = fileinfo.Length;
 
-            last_modified = System.IO.File.GetLastWriteTime(local_path);
+            //last_modified = System.IO.File.GetLastWriteTime(local_path);
 
             //ETag = _GetMd5HashFromFile(value);
 
@@ -1221,26 +1243,10 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 return null;
             }
 
-            HttpWebRequest check_request = verifyIfExists();
-
-            try
+            if (verifyIfExists())
             {
-                var check_response = (HttpWebResponse)check_request.GetResponse();
-                using (var streamReader = new StreamReader(check_response.GetResponseStream()))
-                {
-                    var responseText = streamReader.ReadToEnd();
-                    //Now you have your response.
-                    //or false depending on information in the response
-                    if (check_response.StatusCode == HttpStatusCode.Created)
-                    {
-                        status = "uploaded*";
-                        return responseText;
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                var stop = "it seems that the file doesn't exist";
+                this.status = "This file exists on backup";
+                return null;
             }
 
             
@@ -1260,10 +1266,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 curlinit.Start();
                 string answer = curlinit.StandardOutput.ReadToEnd();
 
-                bMultipartInfo multipart = JsonConvert.DeserializeObject<bMultipartInfo>(answer);
-                    
-
-                // HERE
+                bMultipartInfo multipart = JsonConvert.DeserializeObject<bMultipartInfo>(answer);                    
+                
                 string upload_id = multipart.upload_id;
 
                 curlinit.WaitForExit();
@@ -1288,15 +1292,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
                     parts.parts.Add( detail);
 
-                    //continue;
-
                     Process curl = new Process();
 
                     curl.StartInfo.UseShellExecute = false;
                     curl.StartInfo.FileName = "curl.exe";
                     curl.StartInfo.CreateNoWindow = true;
-                    curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + md5sum + "\" -T \"" + chunk + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "&part=" + part.ToString() + "&upload_id=" + upload_id + "\"";
-                    //curl.StartInfo.Arguments = " --version";
+                    curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + md5sum + "\" -T \"" + chunk + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "&part=" + part.ToString() + "&upload_id=" + upload_id + "\"";                    
                     curl.StartInfo.RedirectStandardOutput = true;
                     bool started = curl.Start();
 
@@ -1309,30 +1310,16 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                     if (String.IsNullOrEmpty(output))
                     {
                         status = "uploaded part " + part.ToString();
-                        lastpart = part;
-                        //return output;
+                        lastpart = part;                        
                     }
                     else
                     {
-                        status = "Error: Upload part" + part.ToString() + " " + output;
-                        //return output;
+                        status = "Error: Upload part" + part.ToString() + " " + output;                        
                     }
                     part++;
                 }
 
                 string send = JsonConvert.SerializeObject(parts);
-                /*
-                using (var writer = new StringWriter())
-                {
-                    using (var provider = CodeDomProvider.CreateProvider("CSharp"))
-                    {
-                        provider.GenerateCodeFromExpression(new CodePrimitiveExpression(send), writer, null);
-                        send = writer.ToString();
-                    }
-                }
-                */
-                // Last part
-                
                 
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(b_http.url + "storage?path=" + path + "&upload_id=" + upload_id );
                 request.Method = "POST";
@@ -1351,9 +1338,6 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 using (var streamReader = new StreamReader(response.GetResponseStream()))
                 {
                     var responseText = streamReader.ReadToEnd();
-                    //Now you have your response.
-                    //or false depending on information in the response
-
 
                     status = "almost ended" + response.Headers.ToString();
                     return responseText;
@@ -1366,7 +1350,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         }
 
-        private HttpWebRequest verifyIfExists()
+        private bool verifyIfExists()
         {
             // Check if file exists   POST /storage?path=/foo/bar.zip&check=1, Headers => [ Etag => 'abc123abcdef..']
             HttpWebRequest check_request = (HttpWebRequest)WebRequest.Create(b_http.url + "storage?path=" + path + "&check=1");
@@ -1375,8 +1359,29 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             check_request.Headers.Add("Authorization: Basic " + _node.auth_key());
             check_request.Headers.Add("Etag: " + ETag);
             check_request.ContentType = "application/json";
-            check_request.Accept = "application/json";
-            return check_request;
+            check_request.Accept = "application/json";          
+
+            try
+            {
+                var check_response = (HttpWebResponse)check_request.GetResponse();
+                using (var streamReader = new StreamReader(check_response.GetResponseStream()))
+                {
+                    var responseText = streamReader.ReadToEnd();
+                    //Now you have your response.
+                    //or false depending on information in the response
+                    if (check_response.StatusCode == HttpStatusCode.Created || check_response.StatusCode == HttpStatusCode.NoContent )
+                    {
+                        this.status = "uploaded*";
+                        return true;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                return false;
+            }
+
+            return false;
         }        
 
         // Todo load local_path with a likely full path ( c:\..)
@@ -1654,35 +1659,3 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
     #endregion
 }
-
-/*
-                Process curlend = new Process();
-                caurlend.StartInfo.UseShellExecute = false;
-                curlend.StartInfo.FileName = "curl.exe";
-                curlend.StartInfo.CreateNoWindow = true;
-                //curlend.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\"" + " -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Etag:" + ETag + "\" -X POST -d \"" + send + "\" --url \"" + b_http.url + "storage?path=" + path + "&upload_id=" + upload_id + "\"";
-                //curlend.StartInfo.Arguments = string.Format(@" -d ""parts={2}"" -k -v  -H ""Authorization: Basic {0}"" -H ""Content-Type: application/json"" -H ""Accept: application/json"" -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, "http://192.168.2.25:3025?path=/&input=432423423"); // b_http.url + "storage?path=" + path + "&upload_id=" + upload_id);
-                curlend.StartInfo.Arguments = string.Format(@"-k --trace-ascii tracy -d @send.txt -H ""Authorization: Basic {0}""  -H ""Content-Type: application/json"" -H ""Accept: application/json""  -H ""Etag: {1}"" --url ""{3}"" ", _node.auth_key(), ETag, send, b_http.url + "storage?path=" + path + "&upload_id=" + upload_id);
-                curlend.StartInfo.RedirectStandardOutput = true;
-                curlend.StartInfo.RedirectStandardError = true;
-                curlend.StartInfo.RedirectStandardInput = true;
-                curlend.Start();
-
-                string last_answer = curlend.StandardOutput.ReadToEnd();
-                string last_error = curlend.StandardError.ReadToEnd();
-                
-                curlend.WaitForExit();                
-
-                curlcommands.Add(curlend.StartInfo.Arguments);
-
-                if (String.IsNullOrEmpty(last_answer))
-                {
-                    status = "uploaded  " + curlend.StartInfo.Arguments + "  " + last_answer; // +last_error;
-                    return last_answer;
-                }
-                else
-                {
-                    status = "Error: Closing the upload" + last_answer;
-                    return last_answer;
-                }                
-*/
