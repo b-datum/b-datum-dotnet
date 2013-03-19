@@ -32,9 +32,7 @@ using System.Runtime.InteropServices;
 
 namespace bdatum
 {
-
-
-
+    
     public class bFileAgentNewFile : EventArgs
     {
         public bFile newfile { get; set; }
@@ -322,6 +320,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         private string FileCacheInfo;
         private Dictionary<string, string> FileCache = new Dictionary<string, string>();
         public DateTime reference { get; set; }
+        public DateTime bigbang = new DateTime(2012, 12, 01);
 
         public bFileAgent()
         {
@@ -329,9 +328,10 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             ReadFileCacheInfo();
         }
 
+        // ?
         ~bFileAgent()
         {
-            _WriteFileCacheInfo();
+           //_WriteFileCacheInfo();
         }
 
         #region Events
@@ -662,14 +662,24 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         // Will fail all operation if something goes wrong
         public void FastReadlocalDir()
-        {
-            var files = DirectoryExtensions.EnumerateFiles(this.path, "*.*");
-            //string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
-
-            foreach (string file in files)
+        {            
+            if ( bigbang.CompareTo(reference) < 0 )
             {
-                this._FastAddFile(file);
+                // read from cache
+                FileCacheLoadFileList();
             }
+            else
+            {
+                //var files = DirectoryExtensions.EnumerateFiles(this.path, "*.*");
+                string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
+
+                foreach (string file in files)
+                {
+                    this._FastAddFile(file);
+                }
+                _WriteFileCacheInfo();
+            }
+            
         }
     
         public void _readlocaldir(string walkpath)
@@ -1175,7 +1185,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             FileInfo fileinfo = new FileInfo(local_path);
             local_size = fileinfo.Length;
 
-            //last_modified = System.IO.File.GetLastWriteTime(local_path);
+            last_modified = System.IO.File.GetLastWriteTime(local_path);
 
             //ETag = _GetMd5HashFromFile(value);
 
