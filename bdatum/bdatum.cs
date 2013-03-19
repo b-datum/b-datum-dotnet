@@ -333,11 +333,11 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 Updated(this, e);
         }
 
-        public event EventHandler AfterFirstSync;
-        protected virtual void OnAfterFirstSync(EventArgs e)
+        public event EventHandler AfterBackup;
+        protected virtual void OnAfterBackup(EventArgs e)
         {
-            if (AfterFirstSync != null)
-                AfterFirstSync(this, e);
+            if (AfterBackup != null)
+                AfterBackup(this, e);
         }
 
         public event EventHandler AfterUpdateFileList;
@@ -572,49 +572,6 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             OnUpdated(EventArgs.Empty);            
         }
 
-        public void readlocaldir()
-        {
-            _readlocaldir(this.path);
-
-            OnUpdated(EventArgs.Empty);
-            if ( ! _firstsync)
-            {
-                OnAfterUpdateFileList(EventArgs.Empty);
-            }
-        }
-
-        public void _readlocaldir(string walkpath)
-        {
-            try
-            {
-                string[] files = Directory.GetFiles(walkpath, "*.*");
-
-                foreach (string file in files)
-                {
-                    this.addfile(file);
-                }
-            }
-            catch( Exception e )
-            {
-                var stop = e; 
-            };
-
-            try
-            {
-                // do something to start download
-                string[] directories = Directory.GetDirectories(walkpath);
-                foreach (string directory in directories)
-                {
-                    _readlocaldir(directory);
-                }
-            }
-            catch (Exception e)
-            {
-                var stop = e;
-            }
-
-        }
-
         public List<bFile> files()
         {
             List<bFile> files = new List<bFile>();
@@ -671,23 +628,104 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 }            
         }
 
+        public void readlocaldir()
+        {
+            _readlocaldir(this.path);
+
+            OnUpdated(EventArgs.Empty);
+            if (!_firstsync)
+            {
+                OnAfterUpdateFileList(EventArgs.Empty);
+            }
+        }
+
+        // Will fail all operation if something goes wrong
+        public void FastReadlocalDir()
+        {
+            string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
+
+            foreach (string file in files)
+            {
+                this.addfile(file);
+            }
+        }
+    
+        public void _readlocaldir(string walkpath)
+        {
+            try
+            {
+                string[] files = Directory.GetFiles(walkpath, "*.*");
+
+                foreach (string file in files)
+                {
+                    this.addfile(file);
+                }
+            }
+            catch (Exception e)
+            {
+                var stop = e;
+            };
+
+            try
+            {
+                // do something to start download
+                string[] directories = Directory.GetDirectories(walkpath);
+                foreach (string directory in directories)
+                {
+                    _readlocaldir(directory);
+                }
+            }
+            catch (Exception e)
+            {
+                var stop = e;
+            }
+
+        }
+
         // Pseudo bug, always do it on c:\ ( should think about later )
         // Upload all files that are local on first attempt
         public void full_backup()
         {
-
-            _readlocaldir_with_upload(this.path, reference, false);            
-            
-//            OnUpdated(EventArgs.Empty);
-            OnAfterFirstSync(EventArgs.Empty);
-
+            if (this.filelist.Count == 0)
+            {
+                readlocaldir();
+            }
+            foreach (bFile file in filelist.Values)
+            {
+                _UpdateCachedFileETag(file);
+                file.upload();
+                OnUpdated(EventArgs.Empty);
+            }            
+            OnAfterBackup(EventArgs.Empty);
         }
 
         public void incremental_backup()
         {
-            _readlocaldir_with_upload(this.path, reference, true);            
+            if (this.filelist.Count == 0)
+            {
+                readlocaldir();
+            }
+            
+            foreach (bFile file in filelist.Values)
+            {
+                _UpdateCachedFileETag(file);
+                if (reference != null)
+                {
+                    if ( file.last_modified.CompareTo(reference) > 0)
+                    {  
+                        file.upload();
+                    }
+                    else
+                    {
+                        file.status = "not updated since last backup";
+                    }
+                }
+                OnUpdated(EventArgs.Empty);
+            }            
+            OnAfterBackup(EventArgs.Empty);
         }
         
+        // Deprecated
         public void _readlocaldir_with_upload(string walkpath, DateTime reference, bool checkdate)
         {
             string[] files = Directory.GetFiles(walkpath, "*.*");
@@ -736,9 +774,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             else
             {
                 return filelist[newfile.path];
-            }
-
-            
+            }            
         }
 
         public bFile file(string name)
