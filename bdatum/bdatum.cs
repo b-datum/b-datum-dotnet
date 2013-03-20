@@ -38,6 +38,16 @@ namespace bdatum
         public bFile newfile { get; set; }
     }
 
+    public class bFileAgentMessage : EventArgs
+    {
+        public string message { get; set; }
+        public string colorname { get; set; }
+        public bFileAgentMessage()
+        {
+            colorname = "Blue";
+        }
+    }
+
     class bWebClient : WebClient
     {
         protected override WebRequest GetWebRequest(Uri address)
@@ -299,6 +309,9 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
     public class bFileAgent
     {
+
+        #region atributes
+
         public string path { get; set; }
         public bNode node { get; set; }
         private bool _IsRunning { get; set; }
@@ -322,10 +335,19 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         public DateTime reference { get; set; }
         public DateTime bigbang = new DateTime(2012, 12, 01);
 
+        private bFileAgentMessage _message = new bFileAgentMessage();
+
+        #endregion
+
+        #region constructor
+
+
         public bFileAgent()
         {
             FileCacheInfo = appPath + @"\FileCacheInfo.dat";
             ReadFileCacheInfo();
+            _message.message = "Starting app";
+            OnSendLogMessage(_message);
         }
 
         // ?
@@ -333,6 +355,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         {
            //_WriteFileCacheInfo();
         }
+
+        #endregion
 
         #region Events
 
@@ -365,6 +389,14 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 AddedFileToList(this, e);
         }
 
+        public delegate void SendLogMessage(object sender, bFileAgentMessage e);
+        public event SendLogMessage LogMessage;
+        protected virtual void OnSendLogMessage(bFileAgentMessage e)
+        {
+            if (LogMessage != null)
+                LogMessage(this, e);
+        }
+        
         // I don´t know if it should be a eventhandler
         public event EventHandler FileSyncError;
         protected virtual void OnFileSyncError(EventArgs e)
@@ -379,6 +411,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         private void ReadFileCacheInfo()
         {
+            _message.message = "Reading cache file data";
+            OnSendLogMessage(_message);
             if (File.Exists(FileCacheInfo))
             {
                 using ( StreamReader reader = new StreamReader( FileCacheInfo) )
@@ -397,6 +431,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         private void FileCacheLoadFileList()
         {
+            _message.message = "Reading cache file list";
+            OnSendLogMessage(_message);
             foreach (string filename in FileCache.Keys)
             {
                 if (!filelist.ContainsKey(filename))
@@ -468,6 +504,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                         }
                         else
                         {
+                            _message.message = "Cache miss for Etag" + file.local_path;
+                            OnSendLogMessage(_message);
                             file.genETag();
                             file.status = "ETag cache";
                             FileCache.Add(file.local_path, file.ETag);
@@ -477,7 +515,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
         }
 
-        #endregion        
+        #endregion                
 
         public void AddToQueue(bFile file)
         {
@@ -649,27 +687,22 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 }            
         }
 
-        public void SlowReadlocalDir()
+        // Fast will fail miserably if there is something wrong on the directory
+        // Slow will handler it better, but it is slower...
+        // They return true if they read the list from the cache
+        public bool FastReadlocalDir()
         {
-            _readlocaldir(this.path);
-
-            OnUpdated(EventArgs.Empty);
-            if (!_firstsync)
-            {
-                OnAfterUpdateFileList(EventArgs.Empty);
-            }
-        }
-
-        // Will fail all operation if something goes wrong
-        public void FastReadlocalDir()
-        {            
+            _message.message = "Reading all files at once";
+            OnSendLogMessage(_message);
             if ( bigbang.CompareTo(reference) < 0 )
             {
-                // read from cache
                 FileCacheLoadFileList();
+                return true;
             }
             else
             {
+                _message.message = "Files list cache miss";
+                OnSendLogMessage(_message);
                 //var files = DirectoryExtensions.EnumerateFiles(this.path, "*.*");
                 string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
 
@@ -678,8 +711,34 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                     this._FastAddFile(file);
                 }
                 _WriteFileCacheInfo();
+                return false;
             }
             
+        }
+        public bool SlowReadlocalDir()
+        {
+            _message.message = "Reading all files one directory at time";
+            OnSendLogMessage(_message);
+            if (bigbang.CompareTo(reference) < 0)
+            {
+                // read from cache
+                FileCacheLoadFileList();
+                return true;
+            }
+            else
+            {
+                _message.message = "Cache miss";
+                OnSendLogMessage(_message);
+
+                _readlocaldir(this.path);
+
+                OnUpdated(EventArgs.Empty);
+                if (!_firstsync)
+                {
+                    OnAfterUpdateFileList(EventArgs.Empty);
+                }
+                return false;
+            }
         }
     
         public void _readlocaldir(string walkpath)
@@ -718,8 +777,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         // Upload all files that are local on first attempt
         public void full_backup()
         {
+            _message.message = "Asked for a full backup, starting it.";
+            OnSendLogMessage(_message);
             if (this.filelist.Count == 0)
             {
+                _message.message = "Seems that we don't have a file list, getting it.";
+                OnSendLogMessage(_message);
                 _readlocaldir_with_upload(this.path, reference, false);
             }            
             _backup(false);
@@ -729,8 +792,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         public void incremental_backup()
         {
+            _message.message = "Asked for a incremental backup, I will just upload the ones that was updated recently";
+            OnSendLogMessage(_message);
             if (this.filelist.Count == 0)
             {
+                _message.message = "Seems that we don't have a file list, getting it.";
+                OnSendLogMessage(_message);
                 _readlocaldir_with_upload(this.path, reference, true);
             }
             _backup();
@@ -747,16 +814,20 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         }
 
         private void _filebackup(bool checkdate, bFile file)
-        {
-            _UpdateCachedFileETag(file);
+        {            
             if (reference != null && checkdate)
             {
                 if (file.last_modified.CompareTo(reference) > 0)
                 {
+                    _message.message = "Uploading " + file.local_path;
+                    OnSendLogMessage(_message);
+                    _UpdateCachedFileETag(file);
                     file.upload();
                 }
                 else
                 {
+                    _message.message = "It is not changed since last backup" + file.local_path;
+                    OnSendLogMessage(_message);
                     file.status = "not updated since last backup";
                 }
             }
@@ -1119,6 +1190,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
     public class bFile
     {
+        #region atributes
 
         //private string _Etag;
 
@@ -1156,6 +1228,10 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         public string status { get; set; }
 
+        #endregion
+
+        #region constructor
+
         // reference
         private bNode _node;
         public bNode node
@@ -1191,6 +1267,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
             status = "local";
         }
+
+        #endregion
 
         public void genETag()
         {
