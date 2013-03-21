@@ -336,6 +336,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         public DateTime bigbang = new DateTime(2012, 12, 01);
 
         private bFileAgentMessage _message = new bFileAgentMessage();
+        private bFileAgentNewFile bFileDetails = new bFileAgentNewFile();
 
         #endregion
 
@@ -690,18 +691,18 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         // Fast will fail miserably if there is something wrong on the directory
         // Slow will handler it better, but it is slower...
         // They return true if they read the list from the cache
-        public bool FastReadlocalDir()
+        public int FastReadlocalDir()
         {
             _message.message = "Reading all files at once";
             OnSendLogMessage(_message);
             if ( bigbang.CompareTo(reference) < 0 )
             {
                 FileCacheLoadFileList();
-                return true;
+                return filelist.Count;
             }
             else
             {
-                _message.message = "Files list cache miss";
+                _message.message = "Files list cache miss by date";
                 OnSendLogMessage(_message);
                 //var files = DirectoryExtensions.EnumerateFiles(this.path, "*.*");
                 string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
@@ -711,11 +712,11 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                     this._FastAddFile(file);
                 }
                 _WriteFileCacheInfo();
-                return false;
+                return filelist.Count;
             }
             
         }
-        public bool SlowReadlocalDir()
+        public int SlowReadlocalDir()
         {
             _message.message = "Reading all files one directory at time";
             OnSendLogMessage(_message);
@@ -723,21 +724,17 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 // read from cache
                 FileCacheLoadFileList();
-                return true;
+                return filelist.Count;
             }
             else
             {
-                _message.message = "Cache miss";
+                _message.message = "Cache miss by date";
                 OnSendLogMessage(_message);
 
                 _readlocaldir(this.path);
 
-                OnUpdated(EventArgs.Empty);
-                if (!_firstsync)
-                {
-                    OnAfterUpdateFileList(EventArgs.Empty);
-                }
-                return false;
+                _WriteFileCacheInfo();
+                return filelist.Count;
             }
         }
     
@@ -775,7 +772,32 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         // Pseudo bug, always do it on c:\ ( should think about later )
         // Upload all files that are local on first attempt
-        public void full_backup()
+
+        public void NonCachedFullBackup()
+        {
+            _message.message = "Will create a backup walking all directories checking all files";
+            OnSendLogMessage(_message);
+            _readlocaldir_with_upload(this.path, reference, false);
+
+            _message.message = "And we ended this backup, with " + filelist.Count + "files saved";
+            OnSendLogMessage(_message);
+            OnAfterBackup(EventArgs.Empty);
+            _WriteFileCacheInfo();
+        }
+
+        public void NonCachedIncrementalBackup()
+        {
+            _message.message = "Will create a Incremental backup walking all directories checking modified all files";
+            OnSendLogMessage(_message);
+            _readlocaldir_with_upload(this.path, reference, true);
+
+            _message.message = "And we ended this backup, with " + filelist.Count + "files saved";
+            OnSendLogMessage(_message);
+            OnAfterBackup(EventArgs.Empty);
+            _WriteFileCacheInfo();
+        }
+
+        public void FullBackup()
         {
             _message.message = "Asked for a full backup, starting it.";
             OnSendLogMessage(_message);
@@ -783,14 +805,18 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 _message.message = "Seems that we don't have a file list, getting it.";
                 OnSendLogMessage(_message);
-                _readlocaldir_with_upload(this.path, reference, false);
-            }            
+                SlowReadlocalDir();
+            }
+            
             _backup(false);
 
+            _message.message = "And we ended this backup, with " + filelist.Count + "files saved";
+            OnSendLogMessage(_message);
             OnAfterBackup(EventArgs.Empty);
+            _WriteFileCacheInfo();
         }
 
-        public void incremental_backup()
+        public void IncrementalBackup()
         {
             _message.message = "Asked for a incremental backup, I will just upload the ones that was updated recently";
             OnSendLogMessage(_message);
@@ -798,10 +824,15 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 _message.message = "Seems that we don't have a file list, getting it.";
                 OnSendLogMessage(_message);
-                _readlocaldir_with_upload(this.path, reference, true);
-            }
-            _backup();
+                SlowReadlocalDir();                
+            }            
+            
+            _backup(true);
+
+            _message.message = "And we ended this backup, with " + filelist.Count + "files saved";
+            OnSendLogMessage(_message);
             OnAfterBackup(EventArgs.Empty);
+            _WriteFileCacheInfo();
         }
 
         private void _backup( bool checkdate = true)
@@ -833,8 +864,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
             else
             {
+                _message.message = "Uploading " + file.local_path;
+                OnSendLogMessage(_message);
                 file.upload();
-            }            
+            }
+            bFileDetails.newfile = file;
+            OnAddedFileToList(bFileDetails);
         }
         
         public void _readlocaldir_with_upload(string walkpath, DateTime reference, bool checkdate)
@@ -845,12 +880,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 bFile newfile = this.addfile(file);
                 _UpdateCachedFileETag(newfile);
 
-                _filebackup(checkdate, newfile);                
+                _filebackup(checkdate, newfile);
 
-                // update file list
-                bFileAgentNewFile e = new bFileAgentNewFile();
-                e.newfile = newfile;
-                OnAddedFileToList( e );
             }
             // do something to start download
             string[] directories = Directory.GetDirectories(walkpath);
@@ -879,6 +910,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 return filelist[newfile.path];
             }            
         }
+
+
 
         public bFile file(string name)
         {
