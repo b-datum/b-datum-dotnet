@@ -421,7 +421,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                     while (!reader.EndOfStream)
                     {
                         string [] cacheinfo = reader.ReadLine().Split('\t');
-                        if (!String.IsNullOrEmpty(cacheinfo[0]))
+                        if (!String.IsNullOrEmpty(cacheinfo[1]))
                         {
                             FileCache.Add( cacheinfo[1], cacheinfo[0] );
                         }                        
@@ -513,10 +513,15 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                         }
                     }
                 }
+
+                bFileDetails.newfile = file;
+                OnAddedFileToList(bFileDetails);
             }
         }
 
         #endregion                
+
+        #region FileAgent
 
         public void AddToQueue(bFile file)
         {
@@ -534,6 +539,9 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 {
                     bFile sync = syncronize.Dequeue();
 
+                    _message.message = "Processing " + sync.action + " of " + sync.local_path;
+                    OnSendLogMessage(_message);
+
                     switch (sync.action)
                     {
                         case "upload":
@@ -546,8 +554,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                             var donothing = "nod";
                             break;
                     }
-
+                    bFileDetails.newfile = sync;
+                    OnAddedFileToList(bFileDetails);
+                    _message.message = "done with: " + sync.action + " of " + sync.local_path;
+                    OnSendLogMessage(_message);
                     OnUpdated(EventArgs.Empty);
+                    _WriteFileCacheInfo();
                 }                
             }
         }
@@ -555,6 +567,9 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         // Constructor?
         public void prepare()
         {
+            _message.message = "File Agent prepared to look for changes on the"  + path;
+            OnSendLogMessage(_message);
+
             watcher.Path = path;
             watcher.IncludeSubdirectories = true;
 
@@ -573,13 +588,18 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         // Attrib is running?
         public void run()
         {
+            _message.message = "File Agent On for: " + path;
+            OnSendLogMessage(_message);
+
             watcher.EnableRaisingEvents = true;
             _IsRunning = true;
 
             // Should run on a thread, never returns
             while (_IsRunning)
             {
+                Thread.Sleep(500);
                 this.Syncronizer();
+                
             }
         }
 
@@ -596,6 +616,17 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         private void OnChanged(object source, FileSystemEventArgs e)
         {
+            _message.message = "Somefile changed.. " + e.FullPath;
+            OnSendLogMessage(_message);
+
+            FileAttributes attr = File.GetAttributes(e.FullPath);
+            if ((attr & FileAttributes.Directory) == FileAttributes.Directory)
+            {
+                _message.message = "This is a directory, skipping for now:" + e.FullPath;
+                OnSendLogMessage(_message);
+                return;
+            }
+            
             // Calls the call back for the interface
             if (e.ChangeType.ToString() == "Created")
             {                
@@ -605,6 +636,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 // queue ( pointer it ? )
                 file_to_queue.action = "upload";
                 this.AddToQueue(file_to_queue);
+                _message.message = "Fine, added this file to queue of processing for upload" + e.FullPath;
+                OnSendLogMessage(_message);
                 //filelist[newfile.path].upload();                
             }
 
@@ -613,6 +646,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 bFile file_to_queue = filelist[e.FullPath];
                 file_to_queue.action = "delete";
                 this.AddToQueue( file_to_queue ); //.delete();
+                _message.message = "Fine, added this file to queue of processing for delete" + e.FullPath;
+                OnSendLogMessage(_message);
             }
 
             if (e.ChangeType.ToString() == "Changed")
@@ -622,6 +657,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 file_to_queue.action = "upload";
                 this.AddToQueue(file_to_queue);
                 //filelist[file_to_queue.path].upload();
+                _message.message = "Fine, added this file to queue of processing for update" + e.FullPath;
+                OnSendLogMessage(_message);
             }
             // This event is trigged now by the sincronize
             //OnUpdated(EventArgs.Empty);
@@ -632,6 +669,9 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             OnUpdated(EventArgs.Empty);            
         }
 
+        #endregion
+
+        #region FileListManager
         public List<bFile> files()
         {
             List<bFile> files = new List<bFile>();
@@ -698,6 +738,9 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             if ( bigbang.CompareTo(reference) < 0 )
             {
                 FileCacheLoadFileList();
+
+                _message.message = "There are " + filelist.Count + " to backup";
+                OnSendLogMessage(_message);
                 return filelist.Count;
             }
             else
@@ -712,6 +755,9 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                     this._FastAddFile(file);
                 }
                 _WriteFileCacheInfo();
+
+                _message.message = "There are " + filelist.Count + " to backup";
+                OnSendLogMessage(_message);
                 return filelist.Count;
             }
             
@@ -724,6 +770,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 // read from cache
                 FileCacheLoadFileList();
+                _message.message = "There are " + filelist.Count + " to backup";
+                OnSendLogMessage(_message);
                 return filelist.Count;
             }
             else
@@ -733,6 +781,9 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
                 _readlocaldir(this.path);
 
+                _message.message = "There are " + filelist.Count + " to backup";
+                OnSendLogMessage(_message);
+                
                 _WriteFileCacheInfo();
                 return filelist.Count;
             }
@@ -770,8 +821,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         }
 
+        #endregion
+
         // Pseudo bug, always do it on c:\ ( should think about later )
         // Upload all files that are local on first attempt
+
+        #region backup
 
         public void NonCachedFullBackup()
         {
@@ -891,11 +946,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
         }
 
-        public void _FastAddFile(string path)
-        {
-            bFile newfile = new bFile(path, node);
-            filelist.Add(newfile.path, newfile);
-        }
+        #endregion
 
         public bFile addfile(string path)
         {
@@ -911,8 +962,12 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }            
         }
 
-
-
+        public void _FastAddFile(string path)
+        {
+            bFile newfile = new bFile(path, node);
+            filelist.Add(newfile.path, newfile);
+        }
+        
         public bFile file(string name)
         {
             return filelist[name];
