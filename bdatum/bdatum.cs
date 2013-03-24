@@ -470,6 +470,10 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             foreach( bFile file in filelist.Values )
             {
                 _UpdateCachedFileETag(file);
+
+                bFileDetails.newfile = file;
+                OnAddedFileToList(bFileDetails);
+
             }
 
             OnUpdated(EventArgs.Empty);
@@ -513,9 +517,6 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                         }
                     }
                 }
-
-                bFileDetails.newfile = file;
-                OnAddedFileToList(bFileDetails);
             }
         }
 
@@ -1340,7 +1341,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             _node = node;
 
             Uri convert = new Uri(value);
-            path = (convert.AbsolutePath).Substring(2);
+            string disc = "/" + (convert.AbsolutePath).Substring(0, 1);
+            path = disc  + (convert.AbsolutePath).Substring(2);
 
             filename = Path.GetFileName(path);
 
