@@ -30,6 +30,9 @@ using System.CodeDom.Compiler;
 
 using System.Runtime.InteropServices;
 
+// Some reflections
+using System.Reflection;
+
 namespace bdatum
 {
     
@@ -65,242 +68,166 @@ namespace bdatum
 
     #region Configuration
 
-    public static class bdatumConfigManager
+    public class bdatumConfigManager
     {
-        public static void SaveSettings(bOrganization oconfig)
+        //public string appPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        public string appPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        private string fileSettings;
+        private string filePathConfig;
+        private string fileBlacklist;    
+
+        public bOrganization Settings { get; set; }
+        public bNode Node { get; set; }
+        public List<string> Path { get; set; }
+        public List<string> PathBlacklist { get; set; }
+
+        public bdatumConfigManager()
         {
-            // maybe it should be PerUserRoamingAndLocal ( in case of domains )
-            Configuration roamingConfig =
-                ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+            filePathConfig = appPath + @"\bdatum\pathinfo";
+            fileSettings = appPath + @"\bdatum\settings";
+            fileBlacklist = appPath + @"\bdatum\blacklist";
 
-            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
-            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
+            Settings = new bOrganization();
+            Node = new bNode();            
+            Path = new List<string>();
+            PathBlacklist = new List<string>();
 
-            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
-
-            if( bconfig.AppSettings.Settings["api_key"] == null )
+            if (!File.Exists(appPath + @"\bdatum"))
             {
-                bconfig.AppSettings.Settings.Add("api_key", oconfig.api_key);
-            }else{
-                bconfig.AppSettings.Settings["api_key"].Value = oconfig.api_key;
+                System.IO.Directory.CreateDirectory(appPath + @"\bdatum");
             }
 
-            if (bconfig.AppSettings.Settings["organization_id"] == null )
-            {
-                bconfig.AppSettings.Settings.Add("organization_id", oconfig.organization_id );
-            }
-            else
-            {
-                bconfig.AppSettings.Settings["organization_id"].Value = oconfig.organization_id;
-            }               
+            LoadSettings();
+            LoadPath();
+            LoadBlackList();
 
-            if( bconfig.AppSettings.Settings["partner_key"] == null )
-            {
-                bconfig.AppSettings.Settings.Add("partner_key", oconfig.partner_key );
-            }
-            else
-            {
-                bconfig.AppSettings.Settings["partner_key"].Value = oconfig.partner_key;
-            }
-
-            if (bconfig.AppSettings.Settings["user_name"] == null)
-            {
-                bconfig.AppSettings.Settings.Add("user_name", oconfig.user_name);
-            }
-            else
-            {
-                bconfig.AppSettings.Settings["user_name"].Value = oconfig.user_name;
-            }
-
-            if (bconfig.AppSettings.Settings["node_key"] == null)
-            {
-                bconfig.AppSettings.Settings.Add("node_key", oconfig.node_key);
-            }
-            else
-            {
-                bconfig.AppSettings.Settings["node_key"].Value = oconfig.node_key;
-            }
-
-            if (bconfig.AppSettings.Settings["last_successful_backup"] == null)
-            {
-                bconfig.AppSettings.Settings.Add("last_successful_backup", oconfig.last_successful_backup.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            }
-            else
-            {
-                bconfig.AppSettings.Settings["last_successful_backup"].Value = oconfig.last_successful_backup.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            }
-
-
-            bconfig.Save();
-            //config.Save(ConfigurationSaveMode.Modified);
-
-            string sectionName = "appSettings";
-            ConfigurationManager.RefreshSection(sectionName);
+            Node.node_key = Settings.node_key;
+            Node.partner_key = Settings.partner_key;
+            Node.blacklist = PathBlacklist;
         }
 
-        public static void LoadSettings(out bOrganization oconfig)
+        public void Save()
         {
-            Configuration roamingConfig =
-                ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+            SaveSettings();
+            SavePath();
+            SaveBlackList();
 
-            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
-            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
-
-            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
-            oconfig = new bOrganization();
-
-            if (bconfig.AppSettings.Settings["api_key"] != null)
-            {
-                oconfig.api_key = bconfig.AppSettings.Settings["api_key"].Value;
-            }
-            if (bconfig.AppSettings.Settings["organization_id"] != null)
-            {
-                oconfig.organization_id = bconfig.AppSettings.Settings["organization_id"].Value;
-            }
-
-            if (bconfig.AppSettings.Settings["partner_key"] != null)
-            {
-                oconfig.partner_key = bconfig.AppSettings.Settings["partner_key"].Value;
-            }
-
-            if (bconfig.AppSettings.Settings["user_name"] != null)
-            {
-                oconfig.user_name = bconfig.AppSettings.Settings["user_name"].Value;
-            }
-
-            if (bconfig.AppSettings.Settings["node_key"] != null)
-            {
-                oconfig.node_key = bconfig.AppSettings.Settings["node_key"].Value;
-            }
-            if (bconfig.AppSettings.Settings["last_successful_backup"] != null)
-            {
-                oconfig.last_successful_backup = DateTime.Parse(bconfig.AppSettings.Settings["last_successful_backup"].Value, System.Globalization.CultureInfo.InvariantCulture); 
-            }
+            Node.node_key = Settings.node_key;
+            Node.partner_key = Settings.partner_key;
+            Node.blacklist = PathBlacklist;
         }
 
-        public static void SavePath(string path)
+        public void SaveSettings()
         {
-            Configuration roamingConfig =
-    ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
-
-            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
-            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
-
-            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
-
-            if (bconfig.AppSettings.Settings["backupPath"] == null)
+            using (StreamWriter writer = new StreamWriter( fileSettings ) )
             {
-                bconfig.AppSettings.Settings.Add("backupPath", path);
-            }
-            else
-            {
-                bconfig.AppSettings.Settings["backupPath"].Value = path;
-            }
-
-            bconfig.Save();
-            //config.Save(ConfigurationSaveMode.Modified);
-
-            string sectionName = "appSettings";
-            ConfigurationManager.RefreshSection(sectionName);
-        }
-
-        public static string LoadPath()
-        {
-            Configuration roamingConfig =
-             ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
-
-            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
-            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
-
-            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
-
-            if (bconfig.AppSettings.Settings["backupPath"] != null)
-            {
-                return bconfig.AppSettings.Settings["backupPath"].Value;
-            }
-            else
-            {
-                return null;
-            }
-        }
-
-        public static void SaveBlackList(List<string> blacklist)
-        {
-            Configuration roamingConfig =
-ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
-
-            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
-            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
-
-            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
-
-            int index = 0;
-            foreach (string path in blacklist)
-            {
-                string directory = "blacklist" + index.ToString();
-
-                if (bconfig.AppSettings.Settings[directory] == null)
+                if (!String.IsNullOrEmpty(Settings.partner_key))
                 {
-                    bconfig.AppSettings.Settings.Add(directory, path);
+                    writer.WriteLine("partner_key" + "\t" + Settings.partner_key);
                 }
-                else
+                if (!String.IsNullOrEmpty(Settings.node_key))
                 {
-                    bconfig.AppSettings.Settings[directory].Value = path;
+                    writer.WriteLine("node_key" + "\t" + Settings.node_key);
                 }
-                index++;
-            }
-
-
-            bconfig.Save();
-            //config.Save(ConfigurationSaveMode.Modified);
-
-            string sectionName = "appSettings";
-            ConfigurationManager.RefreshSection(sectionName);
+                if (Settings.last_successful_backup != null)
+                {
+                    writer.WriteLine("last_successful_backup" + "\t" + Settings.last_successful_backup.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }  
         }
 
-        public static List<string> LoadBlackList()
+        public void LoadSettings()
         {
-            Configuration roamingConfig =
- ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming);
+            if ( File.Exists( fileSettings )){
+                using (StreamReader reader = new StreamReader(fileSettings))
+                {
+                    while (!reader.EndOfStream)
+                    {
+                        string[] set = reader.ReadLine().Split('\t');
+                        if (!String.IsNullOrEmpty(set[1]))
+                        {
+                            if (set[0] == "last_successful_backup")
+                            {
+                                Settings.last_successful_backup = DateTime.Parse(set[1], System.Globalization.CultureInfo.InvariantCulture);
+                            }
+                            else
+                            {
+                                PropertyInfo setinfo = Settings.GetType().GetProperty(set[0]);
+                                setinfo.SetValue(Settings, set[1], null);
+                            }
+                        }
+                    }
+                }
+            }            
+        }
 
-            ExeConfigurationFileMap bconfigFile = new ExeConfigurationFileMap();
-            bconfigFile.ExeConfigFilename = roamingConfig.FilePath;
-
-            Configuration bconfig = ConfigurationManager.OpenMappedExeConfiguration(bconfigFile, ConfigurationUserLevel.None);
-
-            List<string> blacklist = new List<string>();
-
-            
-            for(int index = 0; index < 6; index++)
+        public void SavePath()
+        {
+            using (StreamWriter writer = new StreamWriter(filePathConfig))
             {
-                string directory = "blacklist" + index.ToString();
-
-                if (bconfig.AppSettings.Settings[directory] != null)
-                {
-                    blacklist.Add( bconfig.AppSettings.Settings[directory].Value);
+                foreach (string file in Path)
+                {                    
+                    if (!String.IsNullOrEmpty(file))
+                    {
+                        writer.WriteLine(file);
+                    }
                 }
-                else
-                {
-                    blacklist.Add("");
-                }                
-            }
-            return blacklist;
+            }            
         }
 
-        public static void _LoadFileSettings()
+        public void LoadPath()
         {
-#if DEBUG
-            string applicationName =
-                Environment.GetCommandLineArgs()[0];
-#else 
-           string applicationName =
-          Environment.GetCommandLineArgs()[0]+ ".exe";
-#endif
-            string exePath = System.IO.Path.Combine(
-                    Environment.CurrentDirectory, applicationName);
-            System.Configuration.Configuration config =
-        ConfigurationManager.OpenExeConfiguration(exePath);
+            if (File.Exists(filePathConfig))
+            {
+                using (StreamReader reader = new StreamReader(filePathConfig))
+                {
+                    while (!reader.EndOfStream)
+                    {
+                        string setpath = reader.ReadLine();
+                        if (!String.IsNullOrEmpty(setpath))
+                        {
+                            Path.Add(setpath);                            
+                        }
+                    }
+                }
+            } 
+        }
 
+        public void SaveBlackList()
+        {
+            using (StreamWriter writer = new StreamWriter(fileBlacklist))
+            {
+                foreach (string file in PathBlacklist)
+                {
+                    if (!String.IsNullOrEmpty(file))
+                    {
+                        writer.WriteLine(file);
+                    }
+                }
+            }    
+        }
+
+        public void LoadBlackList()
+        {
+            if (File.Exists(fileBlacklist))
+            {
+                using (StreamReader reader = new StreamReader(fileBlacklist))
+                {
+                    while (!reader.EndOfStream)
+                    {
+                        string setpath = reader.ReadLine();
+                        if (!String.IsNullOrEmpty(setpath))
+                        {
+                            PathBlacklist.Add(setpath);
+                        }
+                    }
+                }
+            } 
+        }
+
+        public void SetBackupDone()
+        {
+            Settings.last_successful_backup = DateTime.Now;
         }
 
     }
@@ -312,7 +239,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         #region atributes
 
-        public string path { get; set; }
+        public List<string> path { get; set; }
+
         public bNode node { get; set; }
         private bool _IsRunning { get; set; }
 
@@ -333,7 +261,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         private string FileCacheInfo;
         private Dictionary<string, string> FileCache = new Dictionary<string, string>();
         public DateTime reference { get; set; }
-        public DateTime bigbang = new DateTime(2012, 12, 01);
+        public DateTime bigbang = new DateTime(1980, 01, 01);
 
         private bFileAgentMessage _message = new bFileAgentMessage();
         private bFileAgentNewFile bFileDetails = new bFileAgentNewFile();
@@ -438,8 +366,17 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 if (!filelist.ContainsKey(filename))
                 {
-                    bFile cached = this.addfile(filename);
-                    cached.ETag = FileCache[filename];
+                    if (File.Exists(filename))
+                    {
+                        bFile cached = this.addfile(filename);
+                        cached.ETag = FileCache[filename];
+                    }
+                    else
+                    {
+                        bFile.delete(filename, node.auth_key());
+                        _message.message = "File will be deleted, since it no longer exists: " + filename;
+                        OnSendLogMessage(_message);
+                    }
                 }
             }
         }
@@ -524,6 +461,10 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         #region FileAgent
 
+        // For each file on path...
+        // prepare...
+        // run
+
         public void AddToQueue(bFile file)
         {
             lock (this)
@@ -549,7 +490,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                              sync.upload();                            
                              break;
                         case "delete":
-                             sync.delete("ww");
+                             sync.delete();
                              break;
                         default:
                             var donothing = "nod";
@@ -565,13 +506,13 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
         }
 
-        // Constructor?
+        // For now we are monitoring just the first path
         public void prepare()
         {
-            _message.message = "File Agent prepared to look for changes on the"  + path;
+            _message.message = "File Agent prepared to look for changes on the"  + path[0];
             OnSendLogMessage(_message);
 
-            watcher.Path = path;
+            watcher.Path = path[0];
             watcher.IncludeSubdirectories = true;
 
             // watch for changes in LastAccess and LastWrite times, 
@@ -589,7 +530,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         // Attrib is running?
         public void run()
         {
-            _message.message = "File Agent On for: " + path;
+            _message.message = "File Agent On for: " + path[0];
             OnSendLogMessage(_message);
 
             watcher.EnableRaisingEvents = true;
@@ -683,38 +624,38 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             return files;
         }
 
-        public void syncFileList()
+        public int syncFileList()
         {
+            _message.message = "Downloading the list of files to recover";
+            OnSendLogMessage(_message);
+
             syncFileList("/");
             if (!_firstsync)
             {
                 OnAfterUpdateFileList(EventArgs.Empty);
             }
+            return filelist.Count;
         }
 
-        public void syncFileList(string path)
-        {           
+        public int syncFileList(string path)
+        {
+
+                _message.message = "Path: " + path;
+                OnSendLogMessage(_message);
 
                 foreach (bFile serverfile in node.list(path))
                 {
+                    // Is uri valid?                    
+                    // /C/Users/Frederico/
+                    serverfile.local_path = serverfile.path.Substring(1,1) + ":" + serverfile.path.Substring(2);
+
                     if (!serverfile.IsDirectory())
                     {
-                        //serverfile.info();
+                        //Create directory
                     }
                     if (filelist.ContainsKey(serverfile.path))
                     {
-                        bFile localfile = filelist[serverfile.path];
-   
-                        if (serverfile.ETag == localfile.ETag)
-                        {
-                            serverfile.status = "Backup Done";
-                        }
-                        else
-                        {
-                            serverfile.status = "Uploading";
-                            // ADD to upload queue
-                        }
-                        OnUpdated(EventArgs.Empty);
+                       // This file exists locally
                     }
                     else
                     {
@@ -722,11 +663,18 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                         {
                             syncFileList(serverfile.path);
                         }
-                        serverfile.status = "Remote Only"; // Deleting ( queue )
+                        serverfile.status = "download"; // Deleting ( queue )
                         filelist.Add(serverfile.path, serverfile);
                         OnUpdated(EventArgs.Empty);
+
+                        bFileDetails.newfile = serverfile;
+                        OnAddedFileToList(bFileDetails);
                     }
-                }            
+                }
+                _message.message = "Total of " + filelist.Count.ToString() + "files to recover";
+                OnSendLogMessage(_message);
+
+                return filelist.Count;
         }
 
         // Fast will fail miserably if there is something wrong on the directory
@@ -749,14 +697,22 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 _message.message = "Files list cache miss by date";
                 OnSendLogMessage(_message);
                 //var files = DirectoryExtensions.EnumerateFiles(this.path, "*.*");
-                string[] files = Directory.GetFiles(this.path, "*.*", SearchOption.AllDirectories);
 
-                foreach (string file in files)
+                foreach (string loopPath in path)
                 {
-                    this._FastAddFile(file);
-                }
-                _WriteFileCacheInfo();
+                    if (String.IsNullOrEmpty(loopPath))
+                    {
+                        continue;
+                    }
 
+                    string[] files = Directory.GetFiles(loopPath, "*.*", SearchOption.AllDirectories);
+
+                    foreach (string file in files)
+                    {
+                        this._FastAddFile(file);
+                    }
+                    _WriteFileCacheInfo();
+                }
                 _message.message = "There are " + filelist.Count + " to backup";
                 OnSendLogMessage(_message);
                 return filelist.Count;
@@ -779,19 +735,33 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             {
                 _message.message = "Cache miss by date";
                 OnSendLogMessage(_message);
-
-                _readlocaldir(this.path);
-
-                _message.message = "There are " + filelist.Count + " to backup";
-                OnSendLogMessage(_message);
-                
-                _WriteFileCacheInfo();
-                return filelist.Count;
             }
+
+            foreach (string loopPath in path)
+            {
+                if (String.IsNullOrEmpty(loopPath))
+                {
+                    continue;
+                }
+                _readlocaldir(loopPath);
+            }
+
+            _message.message = "There are " + filelist.Count + " to backup";
+            OnSendLogMessage(_message);
+                
+            _WriteFileCacheInfo();
+            return filelist.Count;            
         }
     
         public void _readlocaldir(string walkpath)
         {
+
+            // if this path was not modified, we skip it. ( since last backup )
+            var last_modified = System.IO.File.GetLastWriteTime(walkpath);
+            if (last_modified.CompareTo(reference) < 0)
+            {
+                return;
+            }
             try
             {
                 string[] files = Directory.GetFiles(walkpath, "*.*");
@@ -809,6 +779,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             try
             {
                 // do something to start download
+                //if (file.last_modified.CompareTo(reference) > 0)
                 string[] directories = Directory.GetDirectories(walkpath);
                 foreach (string directory in directories)
                 {
@@ -824,16 +795,20 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         #endregion
 
-        // Pseudo bug, always do it on c:\ ( should think about later )
-        // Upload all files that are local on first attempt
-
         #region backup
 
         public void NonCachedFullBackup()
         {
             _message.message = "Will create a backup walking all directories checking all files";
             OnSendLogMessage(_message);
-            _readlocaldir_with_upload(this.path, reference, false);
+            foreach (string loopPath in path)
+            {
+                if (String.IsNullOrEmpty(loopPath))
+                {
+                    continue;
+                }
+                _readlocaldir_with_upload(loopPath, reference, false);
+            }
 
             _message.message = "And we ended this backup, with " + filelist.Count + "files saved";
             OnSendLogMessage(_message);
@@ -845,7 +820,14 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
         {
             _message.message = "Will create a Incremental backup walking all directories checking modified all files";
             OnSendLogMessage(_message);
-            _readlocaldir_with_upload(this.path, reference, true);
+            foreach (string loopPath in path)
+            {
+                if (String.IsNullOrEmpty(loopPath))
+                {
+                    continue;
+                }
+                _readlocaldir_with_upload( loopPath, reference, true);
+            }
 
             _message.message = "And we ended this backup, with " + filelist.Count + "files saved";
             OnSendLogMessage(_message);
@@ -944,6 +926,22 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             foreach (string directory in directories)
             {
                 _readlocaldir_with_upload(directory,reference, checkdate);
+            }
+        }
+
+        #endregion
+
+        #region recover
+
+        // input directory || output directory
+        public void recover()
+        {
+            foreach (bFile file in filelist.Values)
+            {
+                file.download();
+
+                bFileDetails.newfile = file;
+                OnAddedFileToList(bFileDetails);
             }
         }
 
@@ -1351,6 +1349,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             FileInfo fileinfo = new FileInfo(local_path);
             local_size = fileinfo.Length;
 
+            // check it still exists if not mark for delete
+
             last_modified = System.IO.File.GetLastWriteTime(local_path);
 
             //ETag = _GetMd5HashFromFile(value);
@@ -1409,7 +1409,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
         public string upload()
         {
-            if (ETag == null)
+            if (String.IsNullOrEmpty( ETag ))
             {
                 genETag();
             }
@@ -1561,9 +1561,8 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
 
             return false;
         }        
-
-        // Todo load local_path with a likely full path ( c:\..)
-        public string download(string serverpath, string savepath)
+        
+        public string download()
         {
 
             if (_blacklisted())
@@ -1572,12 +1571,40 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
                 return null;
             }
 
-            WebClient wc = new WebClient();
-            wc.Headers.Add("Authorization: Basic " + _node.auth_key());
+            if (this.IsDirectory())
+            {
+                return null;
+            }
 
-            wc.DownloadFile(b_http.url + "/storage/" + path, local_path);
+            string directory = Path.GetDirectoryName(this.local_path);
 
-            return null;
+            if (! File.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            Process curl = new Process();
+
+            curl.StartInfo.UseShellExecute = false;
+            curl.StartInfo.FileName = "curl.exe";
+            curl.StartInfo.CreateNoWindow = true;
+            curl.StartInfo.Arguments = "-k -v -H \"Authorization: Basic " + _node.auth_key() + "\" " + b_http.url + "storage?path=" + this.path + "   -o \"" + local_path + "\"";
+            curl.StartInfo.RedirectStandardOutput = true;
+            bool started = curl.Start();
+
+            string output = curl.StandardOutput.ReadToEnd();
+            curl.WaitForExit();
+
+            if (String.IsNullOrEmpty(output))
+            {
+                status = "Downloaded";
+                return output;
+            }
+            else
+            {
+                status = "Download Failed" + output;
+                return output;
+            }
         }
 
         // Copy and Paste, shame on me
@@ -1607,7 +1634,7 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
         }
 
-        public string delete(string path)
+        public string delete()
         {
             if (_blacklisted())
             {
@@ -1616,6 +1643,14 @@ ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoaming)
             }
 
             return b_http.DELETE("storage/" + path, _node.auth_key());
+        }
+
+        public static string delete( string value, string auth_key )
+        {
+            Uri convert = new Uri(value);
+            string disc = "/" + (convert.AbsolutePath).Substring(0, 1);
+            string path = disc + (convert.AbsolutePath).Substring(2);
+            return b_http.DELETE("storage?path=/" + path, auth_key);
         }
 
         public void info()
