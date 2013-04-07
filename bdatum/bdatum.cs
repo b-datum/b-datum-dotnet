@@ -282,16 +282,14 @@ namespace bdatum
 
         #region constructor
 
-
         public bFileAgent()
         {
             FileCacheInfo = appPath + @"\FileCacheInfo.dat";
-            ReadFileCacheInfo();
+            //ReadFileCacheInfo();
             _message.message = "Starting app";
             OnSendLogMessage(_message);
         }
 
-        // ?
         ~bFileAgent()
         {
            //_WriteFileCacheInfo();
@@ -352,6 +350,8 @@ namespace bdatum
 
         private void ReadFileCacheInfo()
         {
+            FileCache.Clear();
+
             _message.message = "Reading cache file data";
             OnSendLogMessage(_message);
             if (File.Exists(FileCacheInfo))
@@ -370,13 +370,31 @@ namespace bdatum
             }
         }
 
+        /* FileCacheLoadFileList()
+         * 
+         * Create a merged list of files to delete, to sent to queue. 
+         * 
+         * first the files, after the directories, ordered inversed by lenght ( not the best yet but works for now )
+         * 
+         * In true, send the all files to queue direct above, after send all directories ordered to the queue 
+         *  
+         * When the queue works... :)
+         * 
+         * TODO: Only delete from manifesto the file after it is really deleted from server
+         * 
+         * Dot net 4.0 
+         * var pathsdodelete = from element in paths.Keys
+         *       orderby element.Lenght
+         *       select element;
+         */
         private void FileCacheLoadFileList()
         {
             _message.message = "Reading cache file list";
             OnSendLogMessage(_message);
-            List<string> todelete = new List<string>();
-            List<string> reallydeleted = new List<string>();
 
+            ReadFileCacheInfo();
+
+            List<string> todelete = new List<string>();            
             Dictionary<string, string> paths = new Dictionary<string, string>();
 
             foreach (string filename in FileCache.Keys)
@@ -410,7 +428,28 @@ namespace bdatum
                 }
             }
 
+            List<string> pathstodelete = new List<string>();
+            foreach (string path in paths.Keys)
+            {
+                pathstodelete.Add(path);
+            }
+            pathstodelete.Sort(SortByLength);
+
+            List<string> reallydeleted = Delete(todelete);
+            reallydeleted.AddRange(Delete(pathstodelete));          
+
+            foreach (string filename in reallydeleted)
+            {
+                FileCache.Remove(filename);
+            }
+
+            _WriteFileCacheInfo();
+        }
+
+        private List<string> Delete(List<string> todelete)
+        {
             // Delete all files
+            List<string> reallydeleted = new List<string>();
             foreach (string filename in todelete)
             {
                 try
@@ -422,16 +461,32 @@ namespace bdatum
                 }
                 catch (WebException e)
                 {
-                    if (e.Status.ToString() == "Timeout")
+                    // add the file to queue to reprocess
+                    switch (e.Status)
                     {
-                        _message.message = "Connection timeout when deleting: " + filename;
-                        OnSendLogMessage(_message);
-                        
-                    }else if (e.Status == WebExceptionStatus.ProtocolError)
+                        case WebExceptionStatus.NameResolutionFailure:
+                            _message.message = "Connection timeout when deleting: " + filename;
+                            OnSendLogMessage(_message);
+                            break;
+                        case WebExceptionStatus.Timeout:
+                            _message.message = "Connection timeout when deleting: " + filename;
+                            OnSendLogMessage(_message);
+                            break;
+                        case WebExceptionStatus.ProtocolError:
+                            _message.message = "A response error from service was received: " + filename;
+                            OnSendLogMessage(_message);
+                            break;
+                        default:
+                            _message.message = "An unexpected answer from server: " + filename ;
+                            OnSendLogMessage(_message);
+                            _message.message = e.Status.ToString();
+                            OnSendLogMessage(_message);
+                            break;
+                    }
+                    if (e.Status == WebExceptionStatus.ProtocolError)
                     {
                         HttpStatusCode code = ((HttpWebResponse)e.Response).StatusCode;
-
-                        // poors man case
+                    
                         switch (code)
                         {
                             case HttpStatusCode.Gone:
@@ -446,67 +501,7 @@ namespace bdatum
                     }
                 }                                
             }
-
-            /* Dot net 4.0 
-            var pathsdodelete = from element in paths.Keys
-                                orderby element.Lenght
-                                select element;
-            */
-
-            List<string> pathstodelete = new List<string>();
-            foreach (string path in paths.Keys)
-            {
-                pathstodelete.Add(path);
-            }
-            pathstodelete.Sort(SortByLength);
-            foreach (string filename in pathstodelete)
-            {
-                try
-                {
-                    bFile.delete(filename, node.auth_key());
-                    reallydeleted.Add(filename);
-                    _message.message = "SUCCESS: Directory " + filename + " Deleted";
-                    OnSendLogMessage(_message);
-                    FileCache.Remove(filename);
-                }
-                catch (WebException e)
-                {
-                    _message.message = "DELETE " +  e.Response.ResponseUri.ToString();
-                    OnSendLogMessage(_message );
-
-                    if (e.Status.ToString() == "Timeout")
-                    {
-                        _message.message = "Dir: Connection timeout when deleting: " + filename;
-                        OnSendLogMessage(_message);
-
-                    }
-                    else if (e.Status == WebExceptionStatus.ProtocolError)
-                    {
-                        HttpStatusCode code = ((HttpWebResponse)e.Response).StatusCode;
-
-                        // poors man case
-                        switch (code)
-                        {
-                            case HttpStatusCode.Gone:
-                                _message.message = "Dir: File already deleted from server: " + filename;
-                                OnSendLogMessage(_message);
-                                break;
-                            case HttpStatusCode.NotFound:
-                                _message.message = "Dir: File not found on server: " + filename;
-                                OnSendLogMessage(_message);
-                                break;
-                        }
-                    }
-                }
-            }
-
-            // I really miss dot.net 4.. eee to many loops over
-            foreach (string filename in reallydeleted)
-            {
-                FileCache.Remove(filename);
-            }
-
-            _WriteFileCacheInfo();
+            return reallydeleted;
         }
 
         private static int SortByLength(string x, string y)
@@ -523,7 +518,6 @@ namespace bdatum
 
         }
 
-        //Destroy or at the end of first sync
         private void _WriteFileCacheInfo()
         {
             using (StreamWriter writer = new StreamWriter(FileCacheInfo))
@@ -547,6 +541,7 @@ namespace bdatum
          
         }
 
+        // Marked to inspect
         public void FreshFileCacheInfo(DateTime Reference)
         {
             if (reference == null)
@@ -763,6 +758,7 @@ namespace bdatum
         #endregion
 
         #region FileListManager
+
         public List<bFile> files()
         {
             List<bFile> files = new List<bFile>();
@@ -772,7 +768,6 @@ namespace bdatum
             }
             return files;
         }
-
         public int syncFileList()
         {
             _message.message = "Downloading the list of files to recover";
@@ -785,7 +780,6 @@ namespace bdatum
             }
             return filelist.Count;
         }
-
         public int syncFileList(string path)
         {
 
@@ -827,10 +821,12 @@ namespace bdatum
 
                 return filelist.Count;
         }
-
-        // Fast will fail miserably if there is something wrong on the directory
-        // Slow will handler it better, but it is slower...
-        // They return true if they read the list from the cache
+        /*  Read the local file list to backup 
+         * 
+         *  Fast will fail miserably if there is something wrong on the directory
+         *  Slow will handler it better, but it is slower...
+         *  They return true if they read the list from the cache
+         */
         public int FastReadlocalDir()
         {
             _message.message = "Reading all files at once";
@@ -904,17 +900,23 @@ namespace bdatum
                 
             _WriteFileCacheInfo();
             return filelist.Count;            
-        }
-    
+        }    
         public void _readlocaldir(string walkpath)
         {
 
             // if this path was not modified, we skip it. ( since last backup )
             // take the higher, last write or created
-            var last_modified = System.IO.File.GetLastWriteTime(walkpath);
+            var modified = System.IO.File.GetLastWriteTime(walkpath);
+            var created = System.IO.File.GetCreationTime(walkpath);
+
+            DateTime last_modified = created;
+
+            if (modified.CompareTo(created) > 0)
+                last_modified = modified;
+                                   
             if (last_modified.CompareTo(reference) < 0)
             {
-                //return;
+                // return;
             }
             try
             {
@@ -970,7 +972,6 @@ namespace bdatum
             OnAfterBackup(EventArgs.Empty);
             _WriteFileCacheInfo();
         }
-
         public void NonCachedIncrementalBackup()
         {
             _message.message = "Will create a Incremental backup walking all directories checking modified all files";
@@ -989,7 +990,6 @@ namespace bdatum
             OnAfterBackup(EventArgs.Empty);
             _WriteFileCacheInfo();
         }
-
         public void FullBackup()
         {
             _message.message = "Asked for a full backup, starting it.";
@@ -1008,7 +1008,7 @@ namespace bdatum
             OnAfterBackup(EventArgs.Empty);
             _WriteFileCacheInfo();
         }
-
+        // Reference
         public void IncrementalBackup()
         {
             _message.message = "Asked for a incremental backup, I will just upload the ones that was updated recently";
@@ -1025,7 +1025,6 @@ namespace bdatum
             OnAfterBackup(EventArgs.Empty);
             _WriteFileCacheInfo();
         }
-
         private void _backup( bool checkdate = true)
         {
             foreach (bFile file in filelist.Values)
@@ -1034,7 +1033,6 @@ namespace bdatum
             }
             OnUpdated(EventArgs.Empty);
         }
-
         private void _filebackup(bool checkdate, bFile file)
         {            
             if (reference != null && checkdate)
@@ -1061,8 +1059,7 @@ namespace bdatum
             }
             bFileDetails.newfile = file;
             OnAddedFileToList(bFileDetails);
-        }
-        
+        }        
         public void _readlocaldir_with_upload(string walkpath, DateTime reference, bool checkdate)
         {
             string[] files = Directory.GetFiles(walkpath, "*.*");
@@ -1565,34 +1562,32 @@ namespace bdatum
             ETag = _GetMd5HashFromFile(local_path);
         }
 
+        // TODO fix these string return codes
         public string _upload_external_curl()
         {
-            // Verify on server on how to upload files with a espace in the name
-            //string encoded_url = HttpUtility.UrlEncode(b_http.url + "storage?path=" + path);          
-            
             Process curl = new Process();
 
-                curl.StartInfo.UseShellExecute = false;
-                curl.StartInfo.FileName = "curl.exe";
-                curl.StartInfo.CreateNoWindow = true;
-                curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + ETag + "\" -T \"" + local_path + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "\"";
-                //curl.StartInfo.Arguments = " --version";
-                curl.StartInfo.RedirectStandardOutput = true;
-                bool started = curl.Start();
+            curl.StartInfo.UseShellExecute = false;
+            curl.StartInfo.FileName = "curl.exe";
+            curl.StartInfo.CreateNoWindow = true;
+            curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + ETag + "\" -T \"" + local_path + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "\"";
+            curl.StartInfo.RedirectStandardOutput = true;
+            bool started = curl.Start();
 
-                string output = curl.StandardOutput.ReadToEnd();
-                curl.WaitForExit();
+            string output = curl.StandardOutput.ReadToEnd();
+            curl.WaitForExit();
 
-                if (String.IsNullOrEmpty(output))
-                {
-                    status = "uploaded";
-                    return output;
-                }
-                else
-                {
-                    status = "Upload Failed" + output;
-                    return output;
-                }
+            if (String.IsNullOrEmpty(output))
+            {
+                status = "uploaded";
+                return output;
+            }
+            else
+            {
+                // todo: raise exception
+                status = "Upload Failed" + output;
+                return output;
+            }
         }
 
         public string upload()
