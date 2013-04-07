@@ -33,6 +33,8 @@ using System.Runtime.InteropServices;
 // Some reflections
 using System.Reflection;
 
+
+
 namespace bdatum
 {
     
@@ -70,8 +72,8 @@ namespace bdatum
 
     public class bdatumConfigManager
     {
-        //public string appPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        public string appPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        public string appPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        //public string appPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
         private string fileSettings;
         private string filePathConfig;
         private string fileBlacklist;    
@@ -83,6 +85,11 @@ namespace bdatum
 
         public bdatumConfigManager()
         {
+            if (String.IsNullOrEmpty(appPath))
+            {
+                appPath = @"c:\";
+            }
+
             filePathConfig = appPath + @"\bdatum\pathinfo";
             fileSettings = appPath + @"\bdatum\settings";
             fileBlacklist = appPath + @"\bdatum\blacklist";
@@ -230,6 +237,11 @@ namespace bdatum
             Settings.last_successful_backup = DateTime.Now;
         }
 
+        public void ResetBackupDate()
+        {
+            Settings.last_successful_backup = new DateTime(1980, 01, 01);
+        }
+
     }
 
     #endregion
@@ -362,23 +374,153 @@ namespace bdatum
         {
             _message.message = "Reading cache file list";
             OnSendLogMessage(_message);
+            List<string> todelete = new List<string>();
+            List<string> reallydeleted = new List<string>();
+
+            Dictionary<string, string> paths = new Dictionary<string, string>();
+
             foreach (string filename in FileCache.Keys)
             {
                 if (!filelist.ContainsKey(filename))
                 {
-                    if (File.Exists(filename))
+                    // create the bFile first.
+                    // Race condition detected!!! 
+                    if (Directory.Exists(filename) || File.Exists(filename))
                     {
                         bFile cached = this.addfile(filename);
                         cached.ETag = FileCache[filename];
                     }
                     else
                     {
-                        bFile.delete(filename, node.auth_key());
-                        _message.message = "File will be deleted, since it no longer exists: " + filename;
+                        // Class method?
+                        bFile FileToDelete = new bFile(filename, this.node);
+
+                        _message.message = " " + filename + " marked to delete";
                         OnSendLogMessage(_message);
+
+                        if (FileToDelete.IsDirectory)
+                        {
+                            paths.Add(FileToDelete.local_path, "d");
+                        }
+                        else
+                        {
+                            todelete.Add(filename);
+                        }                        
                     }
                 }
             }
+
+            // Delete all files
+            foreach (string filename in todelete)
+            {
+                try
+                {
+                    bFile.delete(filename, node.auth_key());
+                    reallydeleted.Add(filename);
+                    _message.message = "SUCCESS: File " + filename + " Deleted";
+                    OnSendLogMessage(_message);                    
+                }
+                catch (WebException e)
+                {
+                    if (e.Status.ToString() == "Timeout")
+                    {
+                        _message.message = "Connection timeout when deleting: " + filename;
+                        OnSendLogMessage(_message);
+                        
+                    }else if (e.Status == WebExceptionStatus.ProtocolError)
+                    {
+                        HttpStatusCode code = ((HttpWebResponse)e.Response).StatusCode;
+
+                        // poors man case
+                        switch (code)
+                        {
+                            case HttpStatusCode.Gone:
+                                _message.message = "File already deleted from server: " + filename;
+                                OnSendLogMessage(_message);
+                                break;
+                            case HttpStatusCode.NotFound:
+                                _message.message = "File not found on server: " + filename;
+                                OnSendLogMessage(_message);
+                                break;
+                        }
+                    }
+                }                                
+            }
+
+            /* Dot net 4.0 
+            var pathsdodelete = from element in paths.Keys
+                                orderby element.Lenght
+                                select element;
+            */
+
+            List<string> pathstodelete = new List<string>();
+            foreach (string path in paths.Keys)
+            {
+                pathstodelete.Add(path);
+            }
+            pathstodelete.Sort(SortByLength);
+            foreach (string filename in pathstodelete)
+            {
+                try
+                {
+                    bFile.delete(filename, node.auth_key());
+                    reallydeleted.Add(filename);
+                    _message.message = "SUCCESS: Directory " + filename + " Deleted";
+                    OnSendLogMessage(_message);
+                    FileCache.Remove(filename);
+                }
+                catch (WebException e)
+                {
+                    _message.message = "DELETE " +  e.Response.ResponseUri.ToString();
+                    OnSendLogMessage(_message );
+
+                    if (e.Status.ToString() == "Timeout")
+                    {
+                        _message.message = "Dir: Connection timeout when deleting: " + filename;
+                        OnSendLogMessage(_message);
+
+                    }
+                    else if (e.Status == WebExceptionStatus.ProtocolError)
+                    {
+                        HttpStatusCode code = ((HttpWebResponse)e.Response).StatusCode;
+
+                        // poors man case
+                        switch (code)
+                        {
+                            case HttpStatusCode.Gone:
+                                _message.message = "Dir: File already deleted from server: " + filename;
+                                OnSendLogMessage(_message);
+                                break;
+                            case HttpStatusCode.NotFound:
+                                _message.message = "Dir: File not found on server: " + filename;
+                                OnSendLogMessage(_message);
+                                break;
+                        }
+                    }
+                }
+            }
+
+            // I really miss dot.net 4.. eee to many loops over
+            foreach (string filename in reallydeleted)
+            {
+                FileCache.Remove(filename);
+            }
+
+            _WriteFileCacheInfo();
+        }
+
+        private static int SortByLength(string x, string y)
+        {
+            int compare = y.Length.CompareTo(x.Length);
+            if (compare != 0)
+            {
+                return compare;
+            }
+            else
+            {
+                return y.CompareTo(x);
+            }
+
         }
 
         //Destroy or at the end of first sync
@@ -391,7 +533,14 @@ namespace bdatum
                     //if (!String.IsNullOrEmpty(file.ETag) && !String.IsNullOrEmpty(file.local_path))
                     if (!String.IsNullOrEmpty(file.local_path))
                     {
-                        writer.WriteLine(file.ETag + '\t' + file.local_path);
+                        if (file.IsDirectory)
+                        {
+                            writer.WriteLine(file.ETag + '\t' + file.local_path + '\\');
+                        }
+                        else
+                        {
+                            writer.WriteLine(file.ETag + '\t' + file.local_path);
+                        }
                     }
                 }
             }
@@ -649,7 +798,9 @@ namespace bdatum
                     // /C/Users/Frederico/
                     serverfile.local_path = serverfile.path.Substring(1,1) + ":" + serverfile.path.Substring(2);
 
-                    if (!serverfile.IsDirectory())
+                    // TODO this when creating the file from server 
+
+                    if (!serverfile.IsDirectory)
                     {
                         //Create directory
                     }
@@ -659,7 +810,7 @@ namespace bdatum
                     }
                     else
                     {
-                        if (serverfile.IsDirectory())
+                        if (serverfile.IsDirectory)
                         {
                             syncFileList(serverfile.path);
                         }
@@ -729,7 +880,7 @@ namespace bdatum
                 FileCacheLoadFileList();
                 _message.message = "There are " + filelist.Count + " to backup";
                 OnSendLogMessage(_message);
-                return filelist.Count;
+                //return filelist.Count;
             }
             else
             {
@@ -737,6 +888,8 @@ namespace bdatum
                 OnSendLogMessage(_message);
             }
 
+
+            // need to check all directories for changes
             foreach (string loopPath in path)
             {
                 if (String.IsNullOrEmpty(loopPath))
@@ -757,10 +910,11 @@ namespace bdatum
         {
 
             // if this path was not modified, we skip it. ( since last backup )
+            // take the higher, last write or created
             var last_modified = System.IO.File.GetLastWriteTime(walkpath);
             if (last_modified.CompareTo(reference) < 0)
             {
-                return;
+                //return;
             }
             try
             {
@@ -783,6 +937,7 @@ namespace bdatum
                 string[] directories = Directory.GetDirectories(walkpath);
                 foreach (string directory in directories)
                 {
+                    this.addfile(directory);
                     _readlocaldir(directory);
                 }
             }
@@ -858,12 +1013,10 @@ namespace bdatum
         {
             _message.message = "Asked for a incremental backup, I will just upload the ones that was updated recently";
             OnSendLogMessage(_message);
-            if (this.filelist.Count == 0)
-            {
-                _message.message = "Seems that we don't have a file list, getting it.";
-                OnSendLogMessage(_message);
-                SlowReadlocalDir();                
-            }            
+
+            _message.message = "Getting the list of files";
+            OnSendLogMessage(_message);
+            SlowReadlocalDir();                
             
             _backup(true);
 
@@ -1091,13 +1244,20 @@ namespace bdatum
 
         public static string DELETE(string path, string auth_key)
         {
+            Uri BD = new Uri(url);
+            IWebProxy Iproxy = GlobalProxySelection.Select;
+            ServicePoint sp = ServicePointManager.FindServicePoint(BD, Iproxy);
+            sp.ConnectionLeaseTimeout = 9999;
+
             WebRequest request = WebRequest.Create(url + path);
             request.Method = "DELETE";
+            request.Timeout = 10000;
 
             string authotization_header = ("Authorization: Basic " + auth_key);
             request.Headers.Add(authotization_header);
 
             WebResponse response = request.GetResponse();
+            
             var status = (((HttpWebResponse)response).StatusDescription);
 
             Stream data_stream = response.GetResponseStream();
@@ -1289,7 +1449,15 @@ namespace bdatum
         public string filename { get; set; }
         public string type { get; set; }
 
-        public long local_size { get; set; }        
+        public long local_size { get; set; }
+        private bool _IsDirectory;
+        public bool IsDirectory
+        {
+            get
+            {
+                return _IsDirectory;
+            }
+        }
 
         public List<string> curlcommands = new List<string>();
 
@@ -1346,35 +1514,55 @@ namespace bdatum
 
             local_path = Path.GetFullPath(value);
 
-            FileInfo fileinfo = new FileInfo(local_path);
-            local_size = fileinfo.Length;
+            // Yet another race condition
+            if (File.Exists(local_path) || Directory.Exists(local_path))
+            {
+                FileInfo fileinfo = new FileInfo(local_path);
+                FileAttributes attr = File.GetAttributes(local_path);
+                if ((attr & FileAttributes.Directory) == FileAttributes.Directory)
+                {
+                    _IsDirectory = true;                    
+                }
+                else
+                {
+                    local_size = fileinfo.Length;
+                    _IsDirectory = false;
+                }
 
-            // check it still exists if not mark for delete
+                DateTime modified = System.IO.File.GetLastWriteTime(local_path);
+                DateTime created = System.IO.File.GetCreationTime(local_path);
 
-            last_modified = System.IO.File.GetLastWriteTime(local_path);
+                //if (file.last_modified.CompareTo(reference) > 0)
+                if (modified.CompareTo(created) > 0)
+                {
+                    last_modified = modified;
+                }
+                else
+                {
+                    last_modified = created;
+                }                
 
-            //ETag = _GetMd5HashFromFile(value);
-
-            status = "local";
+                status = "local";
+            }
+            else
+            {
+                if (this.path.Substring((this.path.Length - 1)) == "/")
+                {
+                    _IsDirectory = true;
+                }
+                else
+                {
+                    _IsDirectory = false;                
+                }
+                status = "remote";
+            }          
         }
 
-        #endregion
+        #endregion        
 
         public void genETag()
         {
             ETag = _GetMd5HashFromFile(local_path);
-        }
-
-        public bool IsDirectory()
-        {
-            if (this.path.Substring((this.path.Length - 1)) == "/")
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
         }
 
         public string _upload_external_curl()
@@ -1571,7 +1759,7 @@ namespace bdatum
                 return null;
             }
 
-            if (this.IsDirectory())
+            if (this.IsDirectory)
             {
                 return null;
             }
@@ -1650,7 +1838,7 @@ namespace bdatum
             Uri convert = new Uri(value);
             string disc = "/" + (convert.AbsolutePath).Substring(0, 1);
             string path = disc + (convert.AbsolutePath).Substring(2);
-            return b_http.DELETE("storage?path=/" + path, auth_key);
+            return b_http.DELETE("storage?path=" + path, auth_key);
         }
 
         public void info()
