@@ -33,6 +33,8 @@ using System.Runtime.InteropServices;
 // Some reflections
 using System.Reflection;
 
+// Old Good Regex
+using System.Text.RegularExpressions;
 
 
 namespace bdatum
@@ -278,6 +280,10 @@ namespace bdatum
         private bFileAgentMessage _message = new bFileAgentMessage();
         private bFileAgentNewFile bFileDetails = new bFileAgentNewFile();
 
+        // File Recovery
+
+        public string output_directory { get; set; }
+
         #endregion
 
         #region constructor
@@ -418,7 +424,8 @@ namespace bdatum
 
                         if (FileToDelete.IsDirectory)
                         {
-                            paths.Add(FileToDelete.local_path, "d");
+                            if (! paths.ContainsKey( FileToDelete.local_path )  )
+                                paths.Add(FileToDelete.local_path, "d");
                         }
                         else
                         {
@@ -435,42 +442,50 @@ namespace bdatum
             }
             pathstodelete.Sort(SortByLength);
 
-            List<string> reallydeleted = Delete(todelete);
-            reallydeleted.AddRange(Delete(pathstodelete));          
+            todelete.AddRange(pathstodelete);
 
-            foreach (string filename in reallydeleted)
+            int count = 0;
+
+            while (todelete.Count > 0 ||count > 5 )
             {
-                FileCache.Remove(filename);
-            }
+                count++;
+                Thread.Sleep(1000);
+                todelete = Delete(todelete);
+                _message.message = "Trying again the files that failed to delete at server";
+                OnSendLogMessage(_message);
 
-            _WriteFileCacheInfo();
+            }           
+
         }
 
         private List<string> Delete(List<string> todelete)
         {
             // Delete all files
-            List<string> reallydeleted = new List<string>();
+            List<string> notdeleted = new List<string>();
             foreach (string filename in todelete)
             {
                 try
                 {
                     bFile.delete(filename, node.auth_key());
-                    reallydeleted.Add(filename);
+                    filelist.Remove(filename);
                     _message.message = "SUCCESS: File " + filename + " Deleted";
                     OnSendLogMessage(_message);                    
                 }
                 catch (WebException e)
                 {
+                    
                     // add the file to queue to reprocess
                     switch (e.Status)
                     {
                         case WebExceptionStatus.NameResolutionFailure:
                             _message.message = "Connection timeout when deleting: " + filename;
                             OnSendLogMessage(_message);
+                            notdeleted.Add(filename);
                             break;
                         case WebExceptionStatus.Timeout:
                             _message.message = "Connection timeout when deleting: " + filename;
                             OnSendLogMessage(_message);
+                            notdeleted.Add(filename);
                             break;
                         case WebExceptionStatus.ProtocolError:
                             _message.message = "A response error from service was received: " + filename;
@@ -481,6 +496,7 @@ namespace bdatum
                             OnSendLogMessage(_message);
                             _message.message = e.Status.ToString();
                             OnSendLogMessage(_message);
+                            notdeleted.Add(filename);
                             break;
                     }
                     if (e.Status == WebExceptionStatus.ProtocolError)
@@ -495,13 +511,14 @@ namespace bdatum
                                 break;
                             case HttpStatusCode.NotFound:
                                 _message.message = "File not found on server: " + filename;
+                                notdeleted.Add(filename);
                                 OnSendLogMessage(_message);
                                 break;
                         }
                     }
                 }                                
             }
-            return reallydeleted;
+            return notdeleted;
         }
 
         private static int SortByLength(string x, string y)
@@ -522,14 +539,16 @@ namespace bdatum
         {
             using (StreamWriter writer = new StreamWriter(FileCacheInfo))
             {
-                foreach ( bFile file in filelist.Values )
+                foreach (string key in filelist.Keys )
                 {
+                    bFile file = filelist[key];
                     //if (!String.IsNullOrEmpty(file.ETag) && !String.IsNullOrEmpty(file.local_path))
                     if (!String.IsNullOrEmpty(file.local_path))
                     {
                         if (file.IsDirectory)
                         {
-                            writer.WriteLine(file.ETag + '\t' + file.local_path + '\\');
+                            //writer.WriteLine(file.ETag + '\t' + file.local_path + '\\');
+                            writer.WriteLine(file.ETag + '\t' + file.local_path);
                         }
                         else
                         {
@@ -541,7 +560,7 @@ namespace bdatum
          
         }
 
-        // Marked to inspect
+        // Etag rework cache
         public void FreshFileCacheInfo(DateTime Reference)
         {
             if (reference == null)
@@ -780,6 +799,7 @@ namespace bdatum
             }
             return filelist.Count;
         }
+
         public int syncFileList(string path)
         {
 
@@ -790,6 +810,7 @@ namespace bdatum
                 {
                     // Is uri valid?                    
                     // /C/Users/Frederico/
+
                     serverfile.local_path = serverfile.path.Substring(1,1) + ":" + serverfile.path.Substring(2);
 
                     // TODO this when creating the file from server 
@@ -821,6 +842,32 @@ namespace bdatum
 
                 return filelist.Count;
         }
+        // String : the date is a string now. 
+        public int ServerFileList(string path, string ts = "")
+        {
+            _message.message = "Path: " + path;
+            OnSendLogMessage(_message);
+
+            // --  
+
+            foreach (bFile serverfile in node.list_at_once(path,ts))
+            {
+                serverfile.local_path = serverfile.path.Substring(1, 1) + ":" + serverfile.path.Substring(2);
+                
+                filelist.Add(serverfile.path, serverfile);
+                OnUpdated(EventArgs.Empty);
+
+                bFileDetails.newfile = serverfile;
+                OnAddedFileToList(bFileDetails);
+
+            }
+            _message.message = "Total of " + filelist.Count.ToString() + "files on server";
+            OnSendLogMessage(_message);
+
+            return filelist.Count;
+             
+        }
+
         /*  Read the local file list to backup 
          * 
          *  Fast will fail miserably if there is something wrong on the directory
@@ -868,6 +915,8 @@ namespace bdatum
         }
         public int SlowReadlocalDir()
         {
+            //filelist.Clear();
+
             _message.message = "Reading all files one directory at time";
             OnSendLogMessage(_message);
             if (bigbang.CompareTo(reference) < 0)
@@ -914,9 +963,9 @@ namespace bdatum
             if (modified.CompareTo(created) > 0)
                 last_modified = modified;
                                    
-            if (last_modified.CompareTo(reference) < 0)
+            if ( last_modified.CompareTo(reference) < 0)
             {
-                // return;
+                //return;
             }
             try
             {
@@ -1019,11 +1068,13 @@ namespace bdatum
             SlowReadlocalDir();                
             
             _backup(true);
+            _WriteFileCacheInfo();
+
 
             _message.message = "And we ended this backup, with " + filelist.Count + "files saved";
             OnSendLogMessage(_message);
             OnAfterBackup(EventArgs.Empty);
-            _WriteFileCacheInfo();
+            
         }
         private void _backup( bool checkdate = true)
         {
@@ -1088,6 +1139,11 @@ namespace bdatum
         {
             foreach (bFile file in filelist.Values)
             {
+                if ( ! String.IsNullOrEmpty(output_directory))
+                {
+                    file.local_path = output_directory + file.local_path;
+                }
+
                 file.download();
 
                 bFileDetails.newfile = file;
@@ -1102,6 +1158,13 @@ namespace bdatum
             bFile newfile = new bFile(path, node);
             if (!filelist.ContainsKey(newfile.path))
             {
+                // When renaming the file, created/modified date does not work
+                // Should be a flag to upload, but this is fine for now
+                if ( ! FileCache.ContainsKey(path))
+                {
+                    newfile.last_modified = DateTime.Now;
+                }
+
                 filelist.Add(newfile.path, newfile);
                 return newfile;
             }
@@ -1390,12 +1453,56 @@ namespace bdatum
 
                 bFile new_file = JsonConvert.DeserializeObject<bFile>(file.ToString());
                 new_file.node = this;
-                fileslist.Add(new_file);
+                new_file.remote();
+                if (new_file.status == "object created")
+                {
+                    fileslist.Add(new_file);
+                }
+
+            }
+
+            return fileslist;
+        }
+
+        public List<bFile> list_at_once(string path, string ts)
+        {
+            string listurl = "storage?flatten=1&path=" + path;
+
+            if (!String.IsNullOrEmpty(ts))
+            {
+                listurl = listurl + "&ts=" + ts;
+            }
+
+            Stream response = b_http.GET(listurl, auth_key());
+
+            StreamReader response_stream = new StreamReader(response);
+            string responseFromServer = response_stream.ReadToEnd();
+
+            JObject process_json = JObject.Parse(responseFromServer);
+
+            //IList<JToken> files = process_json["objects"].Children();
+
+            List<bFile> fileslist = new List<bFile>();
+
+            // each one converts to json bFile
+            foreach (var file in process_json["objects"].Children())
+            {
+                //string json_answer = b_http.POST("/organization/" + organization_id + "/node", "api_key=" + api_key + "&name=" + this.user_name);
+
+                bFile new_file = JsonConvert.DeserializeObject<bFile>(file.ToString());
+                new_file.node = this;
+                new_file.remote();
+                if (new_file.status == "object created")
+                {
+                    fileslist.Add(new_file);
+                }
+
             }
 
             return fileslist;
         }
         
+        /* TO DELETE
         public FileObjectList list_old ()
         {
             Stream response = b_http.GET("storage", auth_key() );            
@@ -1407,6 +1514,7 @@ namespace bdatum
 
             return root;
         }
+         */
 
         public string info ( string path )
         {
@@ -1494,7 +1602,7 @@ namespace bdatum
 
         public bFile() 
         {
-            status = "";
+
         }
 
         public bFile(string value) : this( value, null ) { }
@@ -1518,7 +1626,15 @@ namespace bdatum
                 FileAttributes attr = File.GetAttributes(local_path);
                 if ((attr & FileAttributes.Directory) == FileAttributes.Directory)
                 {
-                    _IsDirectory = true;                    
+                    _IsDirectory = true;
+                    if (path.Substring((this.path.Length - 1)) != "/")
+                    {
+                        path = path + "/";
+                    }
+                    if (local_path.Substring((this.local_path.Length - 1)) != "\\")
+                    {                        
+                        local_path = local_path + "\\";
+                    }
                 }
                 else
                 {
@@ -1556,6 +1672,36 @@ namespace bdatum
         }
 
         #endregion        
+
+        // Work around for the json builder
+        public void remote()
+        {
+
+            string unit = this.path.Substring(1, 1);
+            string path_withoutunit = this.path.Substring(3);
+
+            string slash = this.path.Substring(2, 1);
+
+            if (slash != "/")
+            {
+                status = "error";
+                return;
+            }
+
+            if (this.path.Substring((this.path.Length - 1)) == "/")
+            {
+                _IsDirectory = true;
+                local_path = Path.GetFullPath(unit + ":/" + path_withoutunit);
+            }
+            else
+            {
+                _IsDirectory = false;
+                local_path = Path.GetFullPath(unit + ":/" + path_withoutunit);
+            }
+
+            status = "object created";
+        }
+
 
         public void genETag()
         {
@@ -1960,13 +2106,22 @@ namespace bdatum
 
         private bool _blacklisted()
         {
-            List<string> blacklist = node.blacklist;
+            List<string> blacklist;
+            if (node.blacklist == null)
+            {
+                blacklist = new List<string>();
+            }
+            else
+            {
+                blacklist = node.blacklist;
+            }
 
             string mypath = Path.GetDirectoryName(local_path);
 
             foreach (string path in blacklist)
             {
-                if (mypath == path)
+                
+                if (mypath.Contains(path))
                     return true;
             }
             return false;
@@ -1987,8 +2142,7 @@ namespace bdatum
     public class bParts
     {
         public List<string[]> parts = new List<string[]>();
-    }
-    
+    }    
 
     #region deprecated
 
