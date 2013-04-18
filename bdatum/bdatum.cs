@@ -799,10 +799,8 @@ namespace bdatum
             }
             return filelist.Count;
         }
-
         public int syncFileList(string path)
         {
-
                 _message.message = "Path: " + path;
                 OnSendLogMessage(_message);
 
@@ -842,6 +840,67 @@ namespace bdatum
 
                 return filelist.Count;
         }
+
+        public List<bFile> RemoteDirectoryList(string path)
+        {
+            _message.message = "Path: " + path;
+            OnSendLogMessage(_message);
+
+            List<bFile> remotelist = new List<bFile>();
+
+            foreach (bFile serverfile in node.list(path))
+            {
+                if (serverfile.IsDirectory)
+                {
+                    serverfile.local_path = serverfile.path.Substring(1, 1) + ":" + serverfile.path.Substring(2);
+
+                    serverfile.status = "server";
+                    remotelist.Add(serverfile);
+                    OnUpdated(EventArgs.Empty);
+
+                    bFileDetails.newfile = serverfile;
+                    OnAddedFileToList(bFileDetails);
+                }
+            }
+
+            return remotelist;
+        }
+
+        /* Remote dir list makes more sense in a tree
+ * 
+public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
+{          
+    if (level > 0)            
+    {               
+        level--;
+
+        _message.message = "Path: " + path;
+        OnSendLogMessage(_message);
+
+        foreach (bFile file in FileList)
+        {
+            List<bFile> files = node.list(file.path);
+
+            foreach (bFile serverfile in files)
+            {
+                if (serverfile.IsDirectory)
+                {
+                    serverfile.local_path = serverfile.path.Substring(1, 1) + ":" + serverfile.path.Substring(2);
+                    serverfile.status = "server";                            
+                            
+                    OnUpdated(EventArgs.Empty);
+
+                    bFileDetails.newfile = serverfile;
+                    OnAddedFileToList(bFileDetails);
+                }                                               
+            }
+        }              
+    }
+    return FileList;                
+}
+ * 
+ */
+
         // String : the date is a string now. 
         public int ServerFileList(string path, string ts = "")
         {
@@ -1144,7 +1203,17 @@ namespace bdatum
                     file.local_path = output_directory + file.local_path;
                 }
 
+                // check if the file is really downloaded
+                // We do not recover files that are blacklisted!!!
+                if (file.IsBlacklisted())
+                {
+                    continue;
+                }
                 file.download();
+                //while ( !file.IsDirectory &&  ! File.Exists(file.local_path))
+                //{
+                //    file.download();
+                //}
 
                 bFileDetails.newfile = file;
                 OnAddedFileToList(bFileDetails);
@@ -1914,10 +1983,13 @@ namespace bdatum
 
             Process curl = new Process();
 
+            Uri path_url = new Uri(b_http.url + "storage?path=" + this.path);            
+
             curl.StartInfo.UseShellExecute = false;
             curl.StartInfo.FileName = "curl.exe";
             curl.StartInfo.CreateNoWindow = true;
-            curl.StartInfo.Arguments = "-k -v -H \"Authorization: Basic " + _node.auth_key() + "\" " + b_http.url + "storage?path=" + this.path + "   -o \"" + local_path + "\"";
+            //curl.StartInfo.Arguments = "-k -v -H \"Authorization: Basic " + _node.auth_key() + "\" " + b_http.url + "storage?path=" + this.path + "   -o \"" + local_path + "\"";
+            curl.StartInfo.Arguments = "-k -v -H \"Authorization: Basic " + _node.auth_key() + "\" " + path_url.AbsoluteUri + "   -o \"" + local_path + "\"";
             curl.StartInfo.RedirectStandardOutput = true;
             bool started = curl.Start();
 
@@ -2104,6 +2176,11 @@ namespace bdatum
             return true;
         }
 
+        public bool IsBlacklisted()
+        {
+            return _blacklisted();
+        }
+
         private bool _blacklisted()
         {
             List<string> blacklist;
@@ -2121,7 +2198,7 @@ namespace bdatum
             foreach (string path in blacklist)
             {
                 
-                if (mypath.Contains(path))
+                if (! String.IsNullOrEmpty(mypath) &&  mypath.Contains(path))
                     return true;
             }
             return false;
