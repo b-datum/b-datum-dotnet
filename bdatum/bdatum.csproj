@@ -49,6 +49,7 @@
     <Compile Include="bdatum.cs">
       <SubType>Component</SubType>
     </Compile>
+    <Compile Include="bRecovery.cs" />
     <Compile Include="DirectoryFast.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
@@ -58,7 +59,9 @@
   <ItemGroup>
     <WCFMetadata Include="Service References\" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Folder Include="Service References\" />
+  </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
