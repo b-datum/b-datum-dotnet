@@ -913,9 +913,12 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             {
                 serverfile.local_path = serverfile.path.Substring(1, 1) + ":" + serverfile.path.Substring(2);
                 
-                filelist.Add(serverfile.path, serverfile);
-                OnUpdated(EventArgs.Empty);
-
+                // should log this, in true is two diff versions
+                if (!filelist.ContainsKey(serverfile.path))
+                {
+                    filelist.Add(serverfile.path, serverfile);
+                    OnUpdated(EventArgs.Empty);
+                }
                 bFileDetails.newfile = serverfile;
                 OnAddedFileToList(bFileDetails);
 
@@ -1191,36 +1194,7 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
 
         #endregion
 
-        #region recover
-
-        // input directory || output directory
-        public void recover()
-        {
-            foreach (bFile file in filelist.Values)
-            {
-                if ( ! String.IsNullOrEmpty(output_directory))
-                {
-                    file.local_path = output_directory + file.local_path;
-                }
-
-                // check if the file is really downloaded
-                // We do not recover files that are blacklisted!!!
-                if (file.IsBlacklisted())
-                {
-                    continue;
-                }
-                file.download();
-                //while ( !file.IsDirectory &&  ! File.Exists(file.local_path))
-                //{
-                //    file.download();
-                //}
-
-                bFileDetails.newfile = file;
-                OnAddedFileToList(bFileDetails);
-            }
-        }
-
-        #endregion
+  
 
         public bFile addfile(string path)
         {
@@ -1263,13 +1237,16 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
         // wrap it!!!
         // TODO: make it in the correct way and wrap it!
         
-        public static Stream GET ( string path, string auth_key )
+        public static Stream GET ( string path, string auth_key = null)
         {
             WebRequest request = WebRequest.Create( url + path );
             request.Method = "GET";
 
-            string authotization_header =  ("Authorization: Basic " + auth_key );
-            request.Headers.Add( authotization_header );
+            if (!String.IsNullOrEmpty(auth_key))
+            {
+                string authotization_header = ("Authorization: Basic " + auth_key);
+                request.Headers.Add(authotization_header);
+            }
 
             try
             {
@@ -1458,7 +1435,7 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
         {
             _node = new bNode();
 
-            _node.organization = this.organization_id;
+            //_node.organization = this.organization_id;
             _node.partner_key = this.partner_key;
             _node.node_key = node_key;
 
@@ -1478,22 +1455,51 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
 
     public class bNode
     {
-        public string name { get; set; }
-        public string id { get; set; }
-        public string organization { get; set; }        
+        
         public string activation_key { get; set; }
-
-        public string partner_key { get; set; }
+        
         public string node_key { get; set; }
+
+        // json 
+        public string partner_key { get; set; }
+        public string status { get; set; }
+        public string name { get; set; }
+        public string operating_system { get; set; }
+        public string key { get; set; } // rewrite set ( should return auth )
+        public string url { get; set; } 
+        // user { url,  name }  not defined yet
+        public string id { get; set; }
+        // organization not defined yet 
+        //public string organization { get; set; }        
+
+        private string authkey;
 
         public List<string> blacklist { get; set; }
 
+        public string AuthKey
+        {
+            get { return authkey; }
+            set
+            {
+                if (authkey == null)
+                    authkey = value;
+            }
+        }
+
         public string auth_key()
         {
-            //return "WktZcUx6SHJUb2F5WVVlY1NNUVM6SnZkaUJlOWJIZmRCNEpLRm5HOGQ=";
-            string to_encode = node_key + ":" + partner_key;
-            byte[] bytes_to_encode = System.Text.ASCIIEncoding.ASCII.GetBytes(to_encode);
-            return System.Convert.ToBase64String(bytes_to_encode);
+            if (authkey == null)
+            {
+                string to_encode = node_key + ":" + partner_key;
+                byte[] bytes_to_encode = System.Text.ASCIIEncoding.ASCII.GetBytes(to_encode);
+                authkey = System.Convert.ToBase64String(bytes_to_encode);
+                return authkey;
+            }
+            else
+            {
+                return authkey;
+            }
+
         }
 
         public string activate()
@@ -1801,7 +1807,10 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             {
                 // todo: raise exception
                 status = "Upload Failed" + output;
-                return output;
+
+                // Try until....
+
+                return _upload_external_curl();
             }
         }
 
@@ -1915,7 +1924,7 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
                 {
                     var responseText = streamReader.ReadToEnd();
 
-                    status = "almost ended" + response.Headers.ToString();
+                    status = "Uploaded: " + response.Headers.ToString();
                     return responseText;
                 }              
             }
