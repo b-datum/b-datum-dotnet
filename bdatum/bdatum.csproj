@@ -50,6 +50,7 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="bRecovery.cs" />
+    <Compile Include="CurlCommand.cs" />
     <Compile Include="DirectoryFast.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

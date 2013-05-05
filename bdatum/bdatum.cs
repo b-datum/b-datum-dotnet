@@ -43,8 +43,8 @@ namespace bdatum
     public class bFileAgentNewFile : EventArgs
     {
         public bFile newfile { get; set; }
+        public bool status { get; set; }
     }
-
     public class bFileAgentMessage : EventArgs
     {
         public string message { get; set; }
@@ -446,7 +446,7 @@ namespace bdatum
 
             int count = 0;
 
-            while (todelete.Count > 0 ||count > 5 )
+            while (todelete.Count > 0 && count > 5 )
             {
                 count++;
                 Thread.Sleep(1000);
@@ -1146,32 +1146,43 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             }
             OnUpdated(EventArgs.Empty);
         }
-        private void _filebackup(bool checkdate, bFile file)
-        {            
-            if (reference != null && checkdate)
+        private bool _filebackup(bool checkdate, bFile file)
+        {
+            int count = 0;
+            bool uploaded = false;
+            bFileDetails.newfile = file;
+            bFileDetails.status = false;
+
+            while (!bFileDetails.status && count < 10)
             {
-                if (file.last_modified.CompareTo(reference) > 0)
+                if (reference != null && checkdate)
                 {
-                    _message.message = "Uploading " + file.local_path;
-                    OnSendLogMessage(_message);
-                    _UpdateCachedFileETag(file);
-                    file.upload();
+                    if (file.last_modified.CompareTo(reference) > 0)
+                    {
+                        _message.message = "Uploading " + file.local_path;
+                        OnSendLogMessage(_message);
+                        _UpdateCachedFileETag(file);
+                        bFileDetails.status = file.upload();                        
+                    }
+                    else
+                    {
+                        _message.message = "It is not changed since last backup" + file.local_path;
+                        OnSendLogMessage(_message);
+                        file.status = "not updated since last backup";
+                        bFileDetails.status = true;
+                    }
                 }
                 else
                 {
-                    _message.message = "It is not changed since last backup" + file.local_path;
+                    _message.message = "Uploading " + file.local_path;
                     OnSendLogMessage(_message);
-                    file.status = "not updated since last backup";
+                    bFileDetails.status = file.upload();
                 }
+                count++;              
+                OnAddedFileToList(bFileDetails);
             }
-            else
-            {
-                _message.message = "Uploading " + file.local_path;
-                OnSendLogMessage(_message);
-                file.upload();
-            }
-            bFileDetails.newfile = file;
-            OnAddedFileToList(bFileDetails);
+
+            return bFileDetails.status;
         }        
         public void _readlocaldir_with_upload(string walkpath, DateTime reference, bool checkdate)
         {
@@ -1661,7 +1672,9 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             initial, local, remote
         };
 
-        public string status { get; set; }
+        // More complex status retrieve, checking the http response
+        public string status { get; set; }        
+        private bHttpResponse httpresponse;
 
         #endregion
 
@@ -1777,14 +1790,13 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             status = "object created";
         }
 
-
         public void genETag()
         {
             ETag = _GetMd5HashFromFile(local_path);
         }
 
         // TODO fix these string return codes
-        public string _upload_external_curl()
+        public bool _upload_external_curl()
         {
             Process curl = new Process();
 
@@ -1793,49 +1805,38 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             curl.StartInfo.CreateNoWindow = true;
             curl.StartInfo.Arguments = "-k -l -v -H \"Authorization: Basic " + _node.auth_key() + "\" -H \"Etag: " + ETag + "\" -T \"" + local_path + "\" -X PUT \"" + b_http.url + "storage?path=" + path + "\"";
             curl.StartInfo.RedirectStandardOutput = true;
+            curl.StartInfo.RedirectStandardError = true;
             bool started = curl.Start();
 
             string output = curl.StandardOutput.ReadToEnd();
+            string error = curl.StandardError.ReadToEnd();
             curl.WaitForExit();
 
-            if (String.IsNullOrEmpty(output))
-            {
-                status = "uploaded";
-                return output;
-            }
-            else
-            {
-                // todo: raise exception
-                status = "Upload Failed" + output;
+            httpresponse = new bHttpResponse(output, error);
+            status = httpresponse.statuscode();
 
-                // Try until....
+            return httpresponse.status();
 
-                return _upload_external_curl();
-            }
         }
 
-        public string upload()
+        public bool upload()
         {
             if (String.IsNullOrEmpty( ETag ))
             {
                 genETag();
             }
-
             // I'm jack gigantic monolitic method
             if (_blacklisted())
             {
                 status = "ignore list";
-                return null;
+                return true;
             }
-
             if (verifyIfExists())
             {
                 this.status = "This file exists on backup";
-                return null;
+                return true;
             }
-
-            
-            //if (local_size > 90 * 1024 * 1024)
+            #region multipart
             if (local_size > 7 * 1024 * 1024)
             {
                 splitfile();
@@ -1925,9 +1926,10 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
                     var responseText = streamReader.ReadToEnd();
 
                     status = "Uploaded: " + response.Headers.ToString();
-                    return responseText;
-                }              
+                    return true;
+                }
             }
+            #endregion
             else
             {
                 return _upload_external_curl();
@@ -1967,20 +1969,29 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             }
 
             return false;
+        }
+        private bool _existslocal()
+        {
+            if (File.Exists(local_path) || Directory.Exists(local_path))
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        public bool IsLocal()
+        {
+            return _existslocal();
         }        
-        
-        public string download()
+        public bool download()
         {
 
             if (_blacklisted())
             {
                 status = "ignore list";
-                return null;
-            }
-
-            if (this.IsDirectory)
-            {
-                return null;
+                return true;
             }
 
             string directory = Path.GetDirectoryName(this.local_path);
@@ -1990,9 +2001,15 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
                 Directory.CreateDirectory(directory);
             }
 
+            if (this.IsDirectory)
+            {
+                status = "directory";
+                return true;
+            }
+
             Process curl = new Process();
 
-            Uri path_url = new Uri(b_http.url + "storage?path=" + this.path);            
+            Uri path_url = new Uri(b_http.url + "storage?path=" + this.path + "&version=1");            
 
             curl.StartInfo.UseShellExecute = false;
             curl.StartInfo.FileName = "curl.exe";
@@ -2000,23 +2017,18 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             //curl.StartInfo.Arguments = "-k -v -H \"Authorization: Basic " + _node.auth_key() + "\" " + b_http.url + "storage?path=" + this.path + "   -o \"" + local_path + "\"";
             curl.StartInfo.Arguments = "-k -v -H \"Authorization: Basic " + _node.auth_key() + "\" " + path_url.AbsoluteUri + "   -o \"" + local_path + "\"";
             curl.StartInfo.RedirectStandardOutput = true;
+            curl.StartInfo.RedirectStandardError = true;
             bool started = curl.Start();
 
             string output = curl.StandardOutput.ReadToEnd();
+            string error = curl.StandardError.ReadToEnd();
             curl.WaitForExit();
 
-            if (String.IsNullOrEmpty(output))
-            {
-                status = "Downloaded";
-                return output;
-            }
-            else
-            {
-                status = "Download Failed" + output;
-                return output;
-            }
-        }
+            httpresponse = new bHttpResponse(output, error);           
+            status = httpresponse.statuscode();
 
+            return _existslocal();
+        }
         // Copy and Paste, shame on me
         private string _GetMd5HashFromFile(string fullpath)
         {
@@ -2043,7 +2055,6 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
                 return null;
             }
         }
-
         public string delete()
         {
             if (_blacklisted())
@@ -2054,7 +2065,6 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
 
             return b_http.DELETE("storage/" + path, _node.auth_key());
         }
-
         public static string delete( string value, string auth_key )
         {
             Uri convert = new Uri(value);
@@ -2062,7 +2072,6 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             string path = disc + (convert.AbsolutePath).Substring(2);
             return b_http.DELETE("storage?path=" + path, auth_key);
         }
-
         public void info()
         {
             WebRequest request = WebRequest.Create( b_http.url + "storage?path=" + path);
@@ -2081,8 +2090,8 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
                 ETag = response.Headers["ETag"];
             }
             
-        }      
-  
+        }        
+        /* UPLOAD new, hand made upload that does not works ok
         public string UPLOADNEW()
         {  
             string auth_key = _node.auth_key();
@@ -2125,7 +2134,7 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
 
             return returnString;
         }
-
+        */
         public bool splitfile()
         {
             // I need to check is enough disk space to continue.
@@ -2184,12 +2193,10 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
 
             return true;
         }
-
         public bool IsBlacklisted()
         {
             return _blacklisted();
         }
-
         private bool _blacklisted()
         {
             List<string> blacklist;

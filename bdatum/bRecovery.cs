@@ -13,7 +13,6 @@ namespace bdatum
     public class bRecovery
     {
         public List<bFile> ToRecover = new List<bFile>();
-
         #region events
 
         private bFileAgentNewFile bFileDetails = new bFileAgentNewFile();
@@ -46,15 +45,26 @@ namespace bdatum
                 if (file.IsBlacklisted())
                 {
                     continue;
-                }
-                file.download();
-                //while ( !file.IsDirectory &&  ! File.Exists(file.local_path))
-                //{
-                //    file.download();
-                //}
+                }              
+                
+                int count = 0;
+                bool recovered = false;
 
-                bFileDetails.newfile = file;
-                OnAddedFileToList(bFileDetails);
+                while (!recovered && count < 5)
+                {
+                    recovered = file.download();
+
+                    bFileDetails.newfile = file;
+                    OnAddedFileToList(bFileDetails);
+                    count++;
+                }
+
+                if (!file.IsLocal())
+                {
+                    file.status = "Download Failed, tryed " + count + " times";
+                    bFileDetails.newfile = file;
+                    OnAddedFileToList(bFileDetails);
+                }
             }
         }
 
