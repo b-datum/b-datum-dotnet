@@ -253,6 +253,8 @@ namespace bdatum
 
         #region atributes
 
+        private Log log = new Log("backup_core");
+
         public List<string> path { get; set; }
 
         public bNode node { get; set; }
@@ -537,6 +539,8 @@ namespace bdatum
 
         private void _WriteFileCacheInfo()
         {
+            log.log("Writing the cache file info...");
+
             using (StreamWriter writer = new StreamWriter(FileCacheInfo))
             {
                 foreach (string key in filelist.Keys )
@@ -1125,13 +1129,20 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
             _message.message = "Asked for a incremental backup, I will just upload the ones that was updated recently";
             OnSendLogMessage(_message);
 
+            log.log("Starting incremental backup");
+
             _message.message = "Getting the list of files";
             OnSendLogMessage(_message);
-            SlowReadlocalDir();                
-            
-            _backup(true);
-            _WriteFileCacheInfo();
 
+            log.log("Getting the list of files");
+
+            SlowReadlocalDir();
+
+            log.log("Read the list of files, with " + filelist.Count.ToString() + "files");
+            _backup(true);
+
+            log.log("Finished the upload, with " + filelist.Count.ToString() + "files saved");
+            _WriteFileCacheInfo();            
 
             _message.message = "And we ended this backup, with " + filelist.Count + "files saved";
             OnSendLogMessage(_message);
@@ -1155,6 +1166,8 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
 
             while (!bFileDetails.status && count < 10)
             {
+                log.log("Trying to upload the file " + bFileDetails.newfile.local_path);
+                count++;              
                 if (reference != null && checkdate)
                 {
                     if (file.last_modified.CompareTo(reference) > 0)
@@ -1178,7 +1191,32 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
                     OnSendLogMessage(_message);
                     bFileDetails.status = file.upload();
                 }
-                count++;              
+
+                log.log("Status: " + bFileDetails.status.ToString() + " for " + bFileDetails.newfile.local_path);
+                
+                OnAddedFileToList(bFileDetails);
+            }
+
+            // In case of failure try again with a last resource
+            if (bFileDetails.status == false)
+            {
+                string tempPath = System.IO.Path.GetTempPath();
+                string tempfilename = tempPath + "\\" + file.ETag;
+
+                File.Delete(tempfilename);
+                File.Copy(file.local_path, tempfilename);
+
+                string old_local_path = file.local_path;
+                file.local_path = tempfilename;
+
+                _message.message = "Last try to upload " + file.local_path;
+                OnSendLogMessage(_message);
+                bFileDetails.status = file.upload();
+
+                log.log("Status with rename: " + bFileDetails.status.ToString() + " for " + bFileDetails.newfile.local_path);
+                File.Delete(tempfilename);
+                file.local_path = old_local_path;
+
                 OnAddedFileToList(bFileDetails);
             }
 
@@ -1238,6 +1276,13 @@ public List<bFile> RemoteDirectoryList(List<bFile> FileList, int level)
         {
             return filelist[name];
         }
+
+        // mmm should not be here
+        public string LogPath()
+        {
+            return log.LogPath;
+        }
+        
     }
 
     public class b_http
